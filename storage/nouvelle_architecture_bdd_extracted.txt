@@ -1,0 +1,495 @@
+PDF: C:\Users\GEDEON NDEKE\Downloads\Nouvelle Architecture Bdd It Asset Management (2).pdf
+Pages: 14
+
+--- PAGE 1 ---
+NOUVELLE ARCHITECTURE BASE DE DONNÉES —
+IT ASSET MANAGEMENT SYSTEM
+CONTEXTE
+Cette nouvelle base de données remplace complètement l’ancienne architecture du système afin de
+supporter :
+gestion dynamique des catégories
+gestion dynamique des caractéristiques
+gestion des équipements uniques et quantitatifs
+gestion des états et cycles de vie
+gestion des utilisateurs
+rôles système
+rôles métier
+workflow de demandes
+validations hiérarchiques
+attributions
+historique des mouvements
+architecture évolutive entreprise
+Cette nouvelle architecture doit être implémentée dans une nouvelle copie du projet et une nouvelle
+copie de la base de données afin de garder un rollback possible.
+1. TABLE ROLES SYSTEME
+CREATETABLEroles_systeme(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+nomVARCHAR(100) NOTNULLUNIQUE,
+descriptionTEXTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP
+);
+Données initiales
+INSERTINTOroles_systeme(nom, description) VALUES
+('admin', 'Administrateur principal du système'),
+('agent_it', 'Agent IT Asset Management'),
+('utilisateur_standard', 'Utilisateur standard');
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+1
+
+--- PAGE 2 ---
+2. TABLE FONCTIONS METIER
+CREATETABLEfonctions_metier(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+nomVARCHAR(100) NOTNULLUNIQUE,
+peut_validerBOOLEANDEFAULTFALSE,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP
+);
+Données initiales
+INSERTINTOfonctions_metier(nom, peut_valider) VALUES
+('Directeur', TRUE),
+('Chef de département', TRUE),
+('Chef de service', TRUE),
+('Employé', FALSE);
+3. TABLE UTILISATEURS
+CREATETABLEutilisateurs(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+nom_completVARCHAR(150) NOTNULL,
+usernameVARCHAR(100) NOTNULLUNIQUE,
+emailVARCHAR(150) NULL,
+mot_de_passeVARCHAR(255) NOTNULL,
+matriculeVARCHAR(50) UNIQUENULL,
+telephoneVARCHAR(40) NULL,
+directionVARCHAR(120) NULL,
+departementVARCHAR(120) NULL,
+serviceVARCHAR(120) NULL,
+agenceVARCHAR(120) NULL,
+role_systeme_idINTUNSIGNEDNOTNULL,
+2
+
+--- PAGE 3 ---
+fonction_metier_idINTUNSIGNEDNOTNULL,
+actifBOOLEANDEFAULTTRUE,
+dernier_loginTIMESTAMPNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+updated_atTIMESTAMPNULLDEFAULTNULL
+ONUPDATECURRENT_TIMESTAMP,
+FOREIGNKEY(role_systeme_id)
+REFERENCESroles_systeme(id),
+FOREIGNKEY(fonction_metier_id)
+REFERENCESfonctions_metier(id)
+);
+4. TABLE VALIDATEURS AUTORISES
+CREATETABLEvalidateurs_autorises(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+utilisateur_idINTUNSIGNEDNOTNULL,
+validateur_idINTUNSIGNEDNOTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(utilisateur_id)
+REFERENCESutilisateurs(id)
+ONDELETECASCADE,
+FOREIGNKEY(validateur_id)
+REFERENCESutilisateurs(id)
+ONDELETECASCADE
+);
+5. TABLE CATEGORIES EQUIPEMENTS
+CREATETABLEcategories_equipements(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+nomVARCHAR(120) NOTNULLUNIQUE,
+3
+
+--- PAGE 4 ---
+descriptionTEXTNULL,
+type_gestionENUM('unique', 'quantite') NOTNULL,
+duree_vie_normaleINTNULL,
+seuil_neufINTNULL,
+seuil_bonINTNULL,
+seuil_moyenINTNULL,
+seuil_mauvaisINTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP
+);
+6. TABLE CARACTERISTIQUES CATEGORIES
+CREATETABLEcaracteristiques_categories(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+categorie_idINTUNSIGNEDNOTNULL,
+nomVARCHAR(120) NOTNULL,
+type_champENUM(
+'texte',
+'nombre',
+'date',
+'liste',
+'textarea',
+'boolean'
+) NOTNULL,
+obligatoireBOOLEANDEFAULTFALSE,
+ordre_affichageINTDEFAULT0,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(categorie_id)
+REFERENCEScategories_equipements(id)
+ONDELETECASCADE
+);
+4
+
+--- PAGE 5 ---
+7. TABLE OPTIONS LISTES
+CREATETABLEoptions_listes(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+caracteristique_idINTUNSIGNEDNOTNULL,
+valeurVARCHAR(150) NOTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(caracteristique_id)
+REFERENCEScaracteristiques_categories(id)
+ONDELETECASCADE
+);
+8. TABLE EQUIPEMENTS
+CREATETABLEequipements(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+categorie_idINTUNSIGNEDNOTNULL,
+code_inventaireVARCHAR(120) UNIQUENULL,
+serial_numberVARCHAR(150) NULL,
+designationVARCHAR(255) NULL,
+modeleVARCHAR(255) NULL,
+marqueVARCHAR(255) NULL,
+date_achatDATENULL,
+date_mise_serviceDATENULL,
+statutENUM(
+'disponible',
+'attribue',
+'maintenance',
+'declasse'
+) DEFAULT'disponible',
+etatENUM(
+'neuf',
+5
+
+--- PAGE 6 ---
+'bon',
+'moyen',
+'mauvais',
+'declasse'
+) DEFAULT'neuf',
+etat_manuelBOOLEANDEFAULTFALSE,
+commentaire_etatTEXTNULL,
+emplacementVARCHAR(255) NULL,
+fournisseurVARCHAR(255) NULL,
+facture_referenceVARCHAR(255) NULL,
+notesTEXTNULL,
+created_byINTUNSIGNEDNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+updated_atTIMESTAMPNULLDEFAULTNULL
+ONUPDATECURRENT_TIMESTAMP,
+FOREIGNKEY(categorie_id)
+REFERENCEScategories_equipements(id),
+FOREIGNKEY(created_by)
+REFERENCESutilisateurs(id)
+ONDELETESETNULL
+);
+9. TABLE VALEURS CARACTERISTIQUES
+EQUIPEMENTS
+CREATETABLEvaleurs_caracteristiques_equipements(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+equipement_idINTUNSIGNEDNOTNULL,
+caracteristique_idINTUNSIGNEDNOTNULL,
+valeurTEXTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+6
+
+--- PAGE 7 ---
+FOREIGNKEY(equipement_id)
+REFERENCESequipements(id)
+ONDELETECASCADE,
+FOREIGNKEY(caracteristique_id)
+REFERENCEScaracteristiques_categories(id)
+ONDELETECASCADE
+);
+10. TABLE STOCKS QUANTITATIFS
+CREATETABLEstocks_quantitatifs(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+categorie_idINTUNSIGNEDNOTNULL,
+designationVARCHAR(255) NOTNULL,
+quantite_totaleINTDEFAULT0,
+quantite_disponibleINTDEFAULT0,
+quantite_attribueeINTDEFAULT0,
+quantite_maintenanceINTDEFAULT0,
+quantite_mauvais_etatINTDEFAULT0,
+quantite_declassedINTDEFAULT0,
+emplacementVARCHAR(255) NULL,
+notesTEXTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(categorie_id)
+REFERENCEScategories_equipements(id)
+ONDELETECASCADE
+);
+7
+
+--- PAGE 8 ---
+11. TABLE ATTRIBUTIONS
+CREATETABLEattributions(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+equipement_idINTUNSIGNEDNULL,
+stock_quantitatif_idINTUNSIGNEDNULL,
+utilisateur_idINTUNSIGNEDNOTNULL,
+quantiteINTDEFAULT1,
+date_attributionTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+date_retourTIMESTAMPNULL,
+statutENUM(
+'active',
+'terminee'
+) DEFAULT'active',
+commentaireTEXTNULL,
+attribue_parINTUNSIGNEDNULL,
+FOREIGNKEY(equipement_id)
+REFERENCESequipements(id)
+ONDELETECASCADE,
+FOREIGNKEY(stock_quantitatif_id)
+REFERENCESstocks_quantitatifs(id)
+ONDELETECASCADE,
+FOREIGNKEY(utilisateur_id)
+REFERENCESutilisateurs(id),
+FOREIGNKEY(attribue_par)
+REFERENCESutilisateurs(id)
+ONDELETESETNULL
+);
+12. TABLE HISTORIQUE EQUIPEMENTS
+CREATETABLEhistorique_equipements(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+8
+
+--- PAGE 9 ---
+equipement_idINTUNSIGNEDNULL,
+stock_quantitatif_idINTUNSIGNEDNULL,
+type_operationENUM(
+'creation',
+'attribution',
+'transfert',
+'maintenance',
+'retour_stock',
+'declassement',
+'modification_etat'
+) NOTNULL,
+utilisateur_source_idINTUNSIGNEDNULL,
+utilisateur_destination_idINTUNSIGNEDNULL,
+quantiteINTDEFAULT1,
+commentaireTEXTNULL,
+effectue_parINTUNSIGNEDNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(equipement_id)
+REFERENCESequipements(id)
+ONDELETECASCADE,
+FOREIGNKEY(stock_quantitatif_id)
+REFERENCESstocks_quantitatifs(id)
+ONDELETECASCADE,
+FOREIGNKEY(utilisateur_source_id)
+REFERENCESutilisateurs(id)
+ONDELETESETNULL,
+FOREIGNKEY(utilisateur_destination_id)
+REFERENCESutilisateurs(id)
+ONDELETESETNULL,
+FOREIGNKEY(effectue_par)
+REFERENCESutilisateurs(id)
+ONDELETESETNULL
+);
+9
+
+--- PAGE 10 ---
+13. TABLE DEMANDES
+CREATETABLEdemandes(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+demandeur_idINTUNSIGNEDNOTNULL,
+validateur_idINTUNSIGNEDNOTNULL,
+categorie_idINTUNSIGNEDNULL,
+type_demandeENUM(
+'nouvel_equipement',
+'remplacement',
+'maintenance',
+'accessoire'
+) NOTNULL,
+justificationTEXTNOTNULL,
+urgenceENUM(
+'faible',
+'normale',
+'haute'
+) DEFAULT'normale',
+statutENUM(
+'brouillon',
+'soumis',
+'validation_responsable',
+'validation_it',
+'approuve',
+'rejete',
+'attribue',
+'cloture'
+) DEFAULT'soumis',
+commentaire_validationTEXTNULL,
+date_validation_responsableTIMESTAMPNULL,
+date_validation_itTIMESTAMPNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(demandeur_id)
+REFERENCESutilisateurs(id),
+FOREIGNKEY(validateur_id)
+REFERENCESutilisateurs(id),
+10
+
+--- PAGE 11 ---
+FOREIGNKEY(categorie_id)
+REFERENCEScategories_equipements(id)
+ONDELETESETNULL
+);
+14. TABLE VALIDATIONS DEMANDES
+CREATETABLEvalidations_demandes(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+demande_idINTUNSIGNEDNOTNULL,
+validateur_idINTUNSIGNEDNOTNULL,
+niveauENUM(
+'responsable',
+'manager_it'
+) NOTNULL,
+decisionENUM(
+'approuve',
+'rejete'
+) NOTNULL,
+commentaireTEXTNULL,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(demande_id)
+REFERENCESdemandes(id)
+ONDELETECASCADE,
+FOREIGNKEY(validateur_id)
+REFERENCESutilisateurs(id)
+ONDELETECASCADE
+);
+15. TABLE NOTIFICATIONS
+CREATETABLEnotifications(
+idINTUNSIGNEDAUTO_INCREMENTPRIMARYKEY,
+utilisateur_idINTUNSIGNEDNOTNULL,
+11
+
+--- PAGE 12 ---
+titreVARCHAR(255) NOTNULL,
+messageTEXTNOTNULL,
+luBOOLEANDEFAULTFALSE,
+created_atTIMESTAMPDEFAULTCURRENT_TIMESTAMP,
+FOREIGNKEY(utilisateur_id)
+REFERENCESutilisateurs(id)
+ONDELETECASCADE
+);
+REGLES IMPORTANTES A IMPLEMENTER
+VALIDATION DES DATES
+date_mise_service ne peut jamais être antérieure à date_achat
+si date inconnue : NULL autorisé
+l’état automatique dépend de la durée de vie de la catégorie
+GESTION DES ETATS
+Les états peuvent être :
+calculés automatiquement selon l’âge
+OU modifiés manuellement
+Si modifié manuellement :
+etat_manuel = true
+Le calcul automatique ne doit plus écraser l’état.
+TYPES DE GESTION
+UNIQUE
+Exemples :
+ordinateurs
+imprimantes
+serveurs
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+12
+
+--- PAGE 13 ---
+Chaque équipement possède :
+serial number
+fiche unique
+historique individuel
+QUANTITE
+Exemples :
+souris
+claviers
+casques
+Gestion par quantité :
+stock disponible
+stock attribué
+stock maintenance
+stock mauvais état
+stock déclassé
+WORKFLOW DEMANDES
+utilisateur crée demande
+utilisateur choisit validateur
+validation responsable
+validation manager IT
+attribution équipement
+historique automatique
+RECOMMANDATION IMPLEMENTATION
+ORDRE RECOMMANDÉ :
+utilisateurs
+rôles système
+rôles métier
+validateurs
+catégories
+caractéristiques dynamiques
+équipements
+stocks quantitatifs
+attributions
+historique
+demandes
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+• 
+1. 
+2. 
+3. 
+4. 
+5. 
+6. 
+1. 
+2. 
+3. 
+4. 
+5. 
+6. 
+7. 
+8. 
+9. 
+10. 
+11. 
+13
+
+--- PAGE 14 ---
+validations
+notifications
+IMPORTANT
+Cette architecture remplace complètement l’ancienne logique du système.
+Il est fortement recommandé de :
+dupliquer le projet actuel
+dupliquer la base actuelle
+implémenter cette nouvelle architecture sur une nouvelle branche/projet
+garder l’ancien système comme rollback
+12. 
+13. 
+• 
+• 
+• 
+• 
+14

@@ -1,0 +1,13 @@
+<?php
+/**
+ * Content to insert into views/equipements/show.php at the end of the right-side column
+ * This integrates state management UI with the existing equipment detail view
+ */
+?>
+
+<!-- Equipment State Management Section (insert before closing </div> of right column) -->
+<?php include __DIR__ . '/partials/state_display.php'; ?>
+<?php include __DIR__ . '/partials/state_history.php'; ?>
+
+<!-- Modal for state change (insert at the very end of show.php before any scripts) -->
+<?php include __DIR__ . '/modals/change_state.php'; ?>
