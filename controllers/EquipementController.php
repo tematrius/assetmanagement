@@ -61,7 +61,7 @@ class EquipementController extends Controller
             'perPageOptions' => [12, 24, 48, 96],
             'stats' => $this->equipements->stats(),
             'analytics' => $this->equipements->managerAnalytics(),
-            'showAssets' => false,
+            'showAssets' => $filters['q'] !== '' || $filters['statut'] !== '',
         ]);
     }
 

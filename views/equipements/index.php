@@ -58,9 +58,9 @@ window.ITAM_EQUIPMENT_CATEGORY_BASE = <?= json_encode(base_url('equipements/cate
 <form class="equipment-search-panel" method="GET" action="<?= e($equipmentListBaseUrl) ?>">
     <div class="equipment-search-main">
         <i class="bi bi-search"></i>
-        <input name="q" value="<?= e((string) ($filters['q'] ?? '')) ?>" placeholder="<?= $showAssets ? 'Rechercher dans cette categorie: SN, inventaire, marque, modele, utilisateur, PF ou attribut' : 'Rechercher une categorie ou un equipement' ?>">
+        <input id="equipment-live-search" name="q" value="<?= e((string) ($filters['q'] ?? '')) ?>" placeholder="<?= $showAssets ? 'Rechercher dans cette categorie: SN, inventaire, marque, modele, utilisateur, PF ou attribut' : 'Rechercher une categorie ou un equipement' ?>" autocomplete="off">
         <?php if (!empty($filters['q'])): ?>
-            <a href="<?= e(base_url('equipements') . '?' . query_with(['q' => null, 'page' => 1])) ?>" title="Effacer la recherche"><i class="bi bi-x-lg"></i></a>
+            <a href="<?= e($equipmentListBaseUrl . '?' . query_with(['q' => null, 'page' => 1, 'categorie_id' => null])) ?>" title="Effacer la recherche"><i class="bi bi-x-lg"></i></a>
         <?php endif; ?>
     </div>
     <div class="equipment-filter-row">
@@ -308,10 +308,47 @@ document.addEventListener('DOMContentLoaded', () => {
     const categorySearch = document.getElementById('equipment-category-search');
     const categoryId = document.getElementById('equipment-category-id');
     const categoryResults = document.getElementById('equipment-category-results');
+    const liveSearch = document.getElementById('equipment-live-search');
+    const searchForm = liveSearch ? liveSearch.closest('form') : null;
     const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+    let autoSearchTimer = null;
+
+    const submitLiveSearch = () => {
+        if (!searchForm) {
+            return;
+        }
+        searchForm.submit();
+    };
+
+    if (liveSearch && searchForm) {
+        liveSearch.addEventListener('input', () => {
+            window.clearTimeout(autoSearchTimer);
+            autoSearchTimer = window.setTimeout(submitLiveSearch, 550);
+        });
+    }
 
     if (categorySearch && categoryId && categoryResults) {
+        const categoryForm = categorySearch.closest('form');
+        const findCategory = (query) => {
+            const normalized = normalize(query).trim();
+            if (normalized === '') {
+                return null;
+            }
+            return categories.find((category) => normalize(category.nom) === normalized)
+                || categories.find((category) => normalize(category.nom).includes(normalized))
+                || null;
+        };
+        const goToCategory = (category) => {
+            if (!category) {
+                return false;
+            }
+            categoryId.value = category.id;
+            categorySearch.value = category.nom;
+            categoryResults.style.display = 'none';
+            window.location.href = `${window.ITAM_EQUIPMENT_CATEGORY_BASE}/${category.id}`;
+            return true;
+        };
         categorySearch.addEventListener('input', () => {
             categoryId.value = '';
             const query = normalize(categorySearch.value).trim();
@@ -320,17 +357,50 @@ document.addEventListener('DOMContentLoaded', () => {
                 `<button type="button" data-category-id="${category.id}"><strong>${escapeHtml(category.nom)}</strong><small>${category.total} equipement(s) - ${category.disponible} disponible(s)</small></button>`
             ).join('');
             categoryResults.style.display = matches.length ? 'block' : 'none';
+            window.clearTimeout(autoSearchTimer);
+            autoSearchTimer = window.setTimeout(() => {
+                if (query.length < 2) {
+                    return;
+                }
+                if (matches.length === 1) {
+                    goToCategory(matches[0]);
+                    return;
+                }
+                if (liveSearch) {
+                    liveSearch.value = categorySearch.value;
+                }
+                submitLiveSearch();
+            }, 650);
         });
         categorySearch.addEventListener('focus', () => categorySearch.dispatchEvent(new Event('input')));
+        categorySearch.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+            const category = findCategory(categorySearch.value);
+            if (category) {
+                event.preventDefault();
+                goToCategory(category);
+            }
+        });
         categoryResults.addEventListener('click', (event) => {
             const button = event.target.closest('[data-category-id]');
             if (!button) return;
             const category = categories.find((item) => String(item.id) === String(button.dataset.categoryId));
-            categoryId.value = category.id;
-            categorySearch.value = category.nom;
-            categoryResults.style.display = 'none';
-            window.location.href = `${window.ITAM_EQUIPMENT_CATEGORY_BASE}/${category.id}`;
+            goToCategory(category);
         });
+        if (categoryForm) {
+            categoryForm.addEventListener('submit', (event) => {
+                if (categoryId.value !== '') {
+                    return;
+                }
+                const category = findCategory(categorySearch.value);
+                if (category) {
+                    event.preventDefault();
+                    goToCategory(category);
+                }
+            });
+        }
     }
 
     const checks = [...document.querySelectorAll('.equip-check')];
