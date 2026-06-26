@@ -8,6 +8,7 @@
     </div>
 
     <script>
+        window.ITAM_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_UNICODE) ?>;
         window.ITAM_USERS = <?= json_encode($utilisateurs, JSON_UNESCAPED_UNICODE) ?>;
         window.ITAM_SITES = <?= json_encode($sites, JSON_UNESCAPED_UNICODE) ?>;
     </script>
@@ -23,14 +24,24 @@
 
         <div class="col-md-6">
             <label class="form-label">Categorie *</label>
-            <select name="categorie_id" id="categorie_id" class="form-select" data-attributes-url="<?= e(base_url('categories')) ?>" required>
-                <option value="">Selectionner</option>
-                <?php foreach ($categories as $cat): ?>
-                    <option value="<?= (int) $cat['id'] ?>" <?= old('categorie_id') === (string) $cat['id'] ? 'selected' : '' ?>>
-                        <?= e($cat['nom']) ?> (<?= e($cat['mode_gestion']) ?>)
-                    </option>
-                <?php endforeach; ?>
-            </select>
+            <?php
+            $selectedCategoryId = old('categorie_id');
+            $selectedCategory = null;
+            foreach ($categories as $cat) {
+                if ((string) $cat['id'] === (string) $selectedCategoryId) {
+                    $selectedCategory = $cat;
+                    break;
+                }
+            }
+            ?>
+            <div class="smart-picker" data-smart-category data-hidden-input="categorie_id">
+                <input type="text" id="category_search" class="form-control" placeholder="Tapez quelques lettres: ordinateur, souris, serveur..." autocomplete="off" value="<?= e($selectedCategory ? ($selectedCategory['nom'] . ' (' . $selectedCategory['mode_gestion'] . ')') : '') ?>">
+                <input type="hidden" name="categorie_id" id="categorie_id" value="<?= e((string) $selectedCategoryId) ?>" data-attributes-url="<?= e(base_url('categories')) ?>" required>
+                <div class="assignment-results" data-category-results></div>
+                <div class="smart-picker-selected" data-category-selected style="<?= $selectedCategory ? '' : 'display:none;' ?>">
+                    <i class="bi bi-tag"></i><span><?= e($selectedCategory ? ($selectedCategory['nom'] . ' - ' . $selectedCategory['mode_gestion']) : '') ?></span>
+                </div>
+            </div>
         </div>
         <div class="col-md-6">
             <label class="form-label">Mode detecte</label>
@@ -111,7 +122,12 @@
         <div class="col-12" id="assignment-panel" style="display:none;">
             <div class="p-3 border rounded bg-light-subtle">
                 <h6 class="mb-2">Attribution automatique</h6>
-                <p class="text-muted mb-2">Si le statut est attribue: pour une imprimante, selectionne un site; sinon, selectionne un utilisateur.</p>
+                <p class="text-muted mb-2">Si le statut est attribue, indique si l'equipement part vers une personne ou vers un site.</p>
+                <div class="assignment-target-selector">
+                    <?php $targetType = old('assignment_target_type', old('site_attribution') ? 'site' : 'personne'); ?>
+                    <label><input type="radio" name="assignment_target_type" value="personne" <?= $targetType !== 'site' ? 'checked' : '' ?>><span><i class="bi bi-person"></i> Personne</span></label>
+                    <label><input type="radio" name="assignment_target_type" value="site" <?= $targetType === 'site' ? 'checked' : '' ?>><span><i class="bi bi-building"></i> Site</span></label>
+                </div>
                 <div class="row g-2">
                     <div class="col-md-7 position-relative" id="assignment-user-block">
                         <label class="form-label">Utilisateur</label>

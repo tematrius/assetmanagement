@@ -38,6 +38,7 @@ $statusLabel = static fn (string $status): string => match ($status) {
 window.ITAM_EQUIPMENT_USERS = <?= json_encode($utilisateurs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 </script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
 <div class="page-heading equipment-page-heading">
     <div>
@@ -89,6 +90,43 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
     <div><span>Attribues</span><strong><?= (int) $stats['attribue'] ?></strong></div>
     <div><span>Maintenance</span><strong><?= (int) $stats['maintenance'] ?></strong></div>
 </div>
+
+<section class="asset-intelligence">
+    <div class="asset-intelligence-heading">
+        <div><h3>Vue de pilotage du parc</h3><p>Disponibilite, utilisation, qualite des donnees et actifs a surveiller.</p></div>
+        <span>Mis a jour en temps reel</span>
+    </div>
+    <div class="asset-decision-kpis">
+        <article><span class="blue"><i class="bi bi-person-check"></i></span><div><small>Taux d'affectation</small><strong><?= (int) $analytics['assignmentRate'] ?>%</strong><p><?= (int) $analytics['status']['attribue'] ?> actif(s) en utilisation</p></div></article>
+        <article><span class="green"><i class="bi bi-box-seam"></i></span><div><small>Disponibilite immediate</small><strong><?= (int) $analytics['availabilityRate'] ?>%</strong><p><?= (int) $analytics['status']['disponible'] ?> actif(s) attribuables</p></div></article>
+        <article><span class="amber"><i class="bi bi-calendar2-check"></i></span><div><small>Dates fiables</small><strong><?= (int) ($analytics['reliability']['exacte'] + $analytics['reliability']['approximative']) ?></strong><p><?= (int) $analytics['reliability']['inconnue'] ?> date(s) inconnue(s)</p></div></article>
+        <article><span class="red"><i class="bi bi-exclamation-triangle"></i></span><div><small>Points d'attention</small><strong><?= (int) $analytics['attentionCount'] ?></strong><p>Maintenance ou vieillissement critique</p></div></article>
+    </div>
+    <div class="asset-chart-grid">
+        <article class="asset-chart-panel">
+            <div><h4>Repartition operationnelle</h4><p>Position actuelle des equipements individuels.</p></div>
+            <div class="asset-chart-canvas"><canvas id="equipmentStatusChart"></canvas></div>
+        </article>
+        <article class="asset-chart-panel">
+            <div><h4>Etat reel du parc</h4><p>Evaluation physique enregistree par l'equipe IT.</p></div>
+            <div class="asset-chart-canvas"><canvas id="equipmentStateChart"></canvas></div>
+        </article>
+        <article class="asset-chart-panel wide">
+            <div><h4>Volume par categorie</h4><p>Comparaison des actifs disponibles et attribues.</p></div>
+            <div class="asset-chart-canvas"><canvas id="equipmentCategoryChart"></canvas></div>
+        </article>
+    </div>
+    <?php if ($analytics['attention'] !== []): ?>
+        <div class="asset-attention-panel">
+            <div class="asset-attention-title"><span><i class="bi bi-shield-exclamation"></i></span><div><h4>Actifs a examiner</h4><p>Priorites detectees selon le statut et le vieillissement theorique.</p></div><a href="<?= e(base_url('equipements') . '?statut=maintenance') ?>">Voir la maintenance</a></div>
+            <div class="asset-attention-list">
+                <?php foreach ($analytics['attention'] as $item): ?>
+                    <a href="<?= e(base_url('equipements/' . (int) $item['id'])) ?>"><span><strong><?= e((string) ($item['serial_number'] ?: $item['code_inventaire'] ?: ('Equipement #' . $item['id']))) ?></strong><small><?= e((string) $item['categorie_nom']) ?></small></span><span class="equipment-status status-<?= e((string) $item['statut']) ?>"><?= e($statusLabel((string) $item['statut'])) ?></span><b>Etat theorique: <?= e((string) $item['etat_theorique']) ?></b><i class="bi bi-chevron-right"></i></a>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+</section>
 
 <section class="equipment-category-section">
     <div class="section-heading">
@@ -266,24 +304,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
 
-    categorySearch.addEventListener('input', () => {
-        categoryId.value = '';
-        const query = normalize(categorySearch.value).trim();
-        const matches = query === '' ? categories : categories.filter((category) => normalize(category.nom).includes(query));
-        categoryResults.innerHTML = matches.slice(0, 10).map((category) =>
-            `<button type="button" data-category-id="${category.id}"><strong>${escapeHtml(category.nom)}</strong><small>${category.total} equipement(s) - ${category.disponible} disponible(s)</small></button>`
-        ).join('');
-        categoryResults.style.display = matches.length ? 'block' : 'none';
-    });
-    categorySearch.addEventListener('focus', () => categorySearch.dispatchEvent(new Event('input')));
-    categoryResults.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-category-id]');
-        if (!button) return;
-        const category = categories.find((item) => String(item.id) === String(button.dataset.categoryId));
-        categoryId.value = category.id;
-        categorySearch.value = category.nom;
-        categoryResults.style.display = 'none';
-    });
+    if (categorySearch && categoryId && categoryResults) {
+        categorySearch.addEventListener('input', () => {
+            categoryId.value = '';
+            const query = normalize(categorySearch.value).trim();
+            const matches = query === '' ? categories : categories.filter((category) => normalize(category.nom).includes(query));
+            categoryResults.innerHTML = matches.slice(0, 10).map((category) =>
+                `<button type="button" data-category-id="${category.id}"><strong>${escapeHtml(category.nom)}</strong><small>${category.total} equipement(s) - ${category.disponible} disponible(s)</small></button>`
+            ).join('');
+            categoryResults.style.display = matches.length ? 'block' : 'none';
+        });
+        categorySearch.addEventListener('focus', () => categorySearch.dispatchEvent(new Event('input')));
+        categoryResults.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-category-id]');
+            if (!button) return;
+            const category = categories.find((item) => String(item.id) === String(button.dataset.categoryId));
+            categoryId.value = category.id;
+            categorySearch.value = category.nom;
+            categoryResults.style.display = 'none';
+        });
+    }
 
     const checks = [...document.querySelectorAll('.equip-check')];
     const toolbar = document.getElementById('equipment-bulk-toolbar');
@@ -296,12 +336,46 @@ document.addEventListener('DOMContentLoaded', () => {
         count.textContent = selected;
         toolbar.classList.toggle('visible', selected > 0);
     };
-    checks.forEach((check) => check.addEventListener('change', syncSelection));
-    action.addEventListener('change', () => {
-        userField.style.display = action.value === 'attribuer_utilisateur' ? '' : 'none';
-        siteField.style.display = action.value === 'attribuer_site' ? '' : 'none';
-    });
-    userField.style.display = 'none';
-    siteField.style.display = 'none';
+    if (toolbar && count && action && userField && siteField) {
+        checks.forEach((check) => check.addEventListener('change', syncSelection));
+        action.addEventListener('change', () => {
+            userField.style.display = action.value === 'attribuer_utilisateur' ? '' : 'none';
+            siteField.style.display = action.value === 'attribuer_site' ? '' : 'none';
+        });
+        userField.style.display = 'none';
+        siteField.style.display = 'none';
+    }
+
+    if (typeof Chart !== 'undefined') {
+        const palette = ['#2e78ad', '#2f8765', '#c28a1b', '#ad3c4f', '#67727d'];
+        new Chart(document.getElementById('equipmentStatusChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Disponibles', 'Attribues', 'Maintenance', 'Declasses'],
+                datasets: [{data: <?= json_encode(array_values($analytics['status'])) ?>, backgroundColor: palette.slice(0, 4), borderWidth: 0}]
+            },
+            options: {responsive: true, maintainAspectRatio: false, cutout: '66%', plugins: {legend: {position: 'bottom', labels: {boxWidth: 9, usePointStyle: true, font: {size: 10}}}}}
+        });
+        new Chart(document.getElementById('equipmentStateChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Neuf', 'Bon', 'Moyen', 'Mauvais', 'Declasse'],
+                datasets: [{data: <?= json_encode(array_values($analytics['states'])) ?>, backgroundColor: ['#2f8765', '#5c9f79', '#d2a337', '#bd5c3d', '#6b7078'], borderWidth: 0}]
+            },
+            options: {responsive: true, maintainAspectRatio: false, cutout: '66%', plugins: {legend: {position: 'bottom', labels: {boxWidth: 9, usePointStyle: true, font: {size: 10}}}}}
+        });
+        new Chart(document.getElementById('equipmentCategoryChart'), {
+            type: 'bar',
+            data: {
+                labels: <?= json_encode(array_column($analytics['categories'], 'nom'), JSON_UNESCAPED_UNICODE) ?>,
+                datasets: [
+                    {label: 'Disponibles', data: <?= json_encode(array_column($analytics['categories'], 'disponible')) ?>, backgroundColor: '#2f8765', borderRadius: 3},
+                    {label: 'Attribues', data: <?= json_encode(array_column($analytics['categories'], 'attribue')) ?>, backgroundColor: '#2e78ad', borderRadius: 3},
+                    {label: 'Maintenance', data: <?= json_encode(array_column($analytics['categories'], 'maintenance')) ?>, backgroundColor: '#c28a1b', borderRadius: 3}
+                ]
+            },
+            options: {responsive: true, maintainAspectRatio: false, scales: {y: {beginAtZero: true, ticks: {precision: 0}}, x: {grid: {display: false}}}, plugins: {legend: {position: 'bottom', labels: {boxWidth: 9, usePointStyle: true, font: {size: 10}}}}}
+        });
+    }
 });
 </script>

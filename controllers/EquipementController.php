@@ -60,6 +60,7 @@ class EquipementController extends Controller
             'pagination' => $result,
             'perPageOptions' => [12, 24, 48, 96],
             'stats' => $this->equipements->stats(),
+            'analytics' => $this->equipements->managerAnalytics(),
             'showAssets' => false,
         ]);
     }
@@ -110,6 +111,7 @@ class EquipementController extends Controller
             'pagination' => $result,
             'perPageOptions' => [12, 24, 48, 96],
             'stats' => $this->equipements->stats(),
+            'analytics' => $this->equipements->managerAnalytics(),
             'showAssets' => true,
         ]);
     }
@@ -297,11 +299,21 @@ class EquipementController extends Controller
         $currentHolderId = $this->currentV2HolderId($db, (int) $id);
         $currentHolder = $currentHolderId !== null ? $this->utilisateurs->find($currentHolderId) : null;
         $history = $this->historyV2ByEquipement($db, (int) $id);
+        $currentSiteAssignment = '';
+        if ($currentHolder === null && (string) ($equipement['statut'] ?? '') === 'attribue') {
+            foreach ($history as $movement) {
+                if ((string) ($movement['destination_type'] ?? '') === 'site' && trim((string) ($movement['destination_label'] ?? '')) !== '') {
+                    $currentSiteAssignment = (string) $movement['destination_label'];
+                    break;
+                }
+            }
+        }
 
         $this->view('equipements/show', [
             'title' => 'Fiche equipement',
             'equipement' => $equipement,
             'currentHolder' => $currentHolder,
+            'currentSiteAssignment' => $currentSiteAssignment,
             'utilisateurs' => $this->utilisateurs->allAssignable(),
             'history' => array_slice($history, 0, 8),
             'state_history' => $this->equipements->getEtatHistorique((int) $id),
@@ -578,10 +590,14 @@ class EquipementController extends Controller
         $categorieId = (int) ($_POST['categorie_id'] ?? 0);
         $status = trim((string) ($_POST['statut'] ?? 'disponible'));
         $assigneeId = (int) ($_POST['utilisateur_attribution_id'] ?? 0);
+        $assignmentTargetType = trim((string) ($_POST['assignment_target_type'] ?? 'personne'));
         $siteAssignment = trim((string) ($_POST['site_attribution'] ?? ''));
 
         if ($siteAssignment === '') {
             $siteAssignment = trim((string) ($_POST['site_attribution_input'] ?? ''));
+        }
+        if (!in_array($assignmentTargetType, ['personne', 'site'], true)) {
+            $assignmentTargetType = 'personne';
         }
 
         if ($serial === '' || $categorieId <= 0) {
@@ -608,23 +624,29 @@ class EquipementController extends Controller
             redirect('stocks/create');
         }
 
-        $isPrinter = str_contains(strtolower((string) ($category['nom'] ?? '')), 'imprimante');
+        $isSiteAssignment = $assignmentTargetType === 'site';
 
         if (($assigneeId > 0 || $siteAssignment !== '') && $status !== 'attribue') {
             $status = 'attribue';
         }
 
         if ($status === 'attribue') {
-            if ($isPrinter && $siteAssignment === '') {
-                flash('error', 'Site requis pour une imprimante attribuee.');
+            if ($isSiteAssignment && $siteAssignment === '') {
+                flash('error', 'Site requis pour une attribution vers site.');
                 remember_old_input($_POST);
                 redirect('equipements/create');
             }
 
-            if (!$isPrinter && $assigneeId <= 0) {
+            if (!$isSiteAssignment && $assigneeId <= 0) {
                 flash('error', 'Utilisateur requis pour un equipement attribue.');
                 remember_old_input($_POST);
                 redirect('equipements/create');
+            }
+
+            if ($isSiteAssignment) {
+                $assigneeId = 0;
+            } else {
+                $siteAssignment = '';
             }
         }
 
@@ -649,7 +671,7 @@ class EquipementController extends Controller
                 $status,
                 $assigneeId,
                 $siteAssignment,
-                $isPrinter,
+                $isSiteAssignment,
                 $this->normalizeLogistics($_POST),
                 trim((string) ($_POST['statut_commentaire'] ?? ''))
             );
@@ -684,6 +706,9 @@ class EquipementController extends Controller
         }
 
         $lastMovement = (new Mouvement())->historyByEquipement((int) $id)[0] ?? [];
+        if ($currentSite === '' && (string) ($lastMovement['destination_type'] ?? '') === 'site') {
+            $currentSite = (string) ($lastMovement['destination_label'] ?? '');
+        }
 
         $this->view('equipements/edit', [
             'title' => 'Modifier equipement',
@@ -730,13 +755,17 @@ class EquipementController extends Controller
 
         $status = (string) ($_POST['statut'] ?? 'disponible');
         $assigneeId = (int) ($_POST['utilisateur_attribution_id'] ?? 0);
+        $assignmentTargetType = trim((string) ($_POST['assignment_target_type'] ?? 'personne'));
         $siteAssignment = trim((string) ($_POST['site_attribution'] ?? ''));
         $statusReason = trim((string) ($_POST['statut_commentaire'] ?? ''));
         if ($siteAssignment === '') {
             $siteAssignment = trim((string) ($_POST['site_attribution_input'] ?? ''));
         }
+        if (!in_array($assignmentTargetType, ['personne', 'site'], true)) {
+            $assignmentTargetType = 'personne';
+        }
         $logistics = $this->normalizeLogistics($_POST);
-        $isSiteAssignment = $siteAssignment !== '' || $logistics['destination_type'] === 'site';
+        $isSiteAssignment = $assignmentTargetType === 'site' || $siteAssignment !== '' || $logistics['destination_type'] === 'site';
 
         if ($logistics['destination_type'] === 'utilisateur' || $logistics['destination_type'] === 'site') {
             $status = 'attribue';
@@ -749,10 +778,22 @@ class EquipementController extends Controller
         $_POST['statut'] = $status;
 
         if ($status === 'attribue') {
-            if ($assigneeId <= 0 && $siteAssignment === '') {
-                flash('error', 'Selectionne un utilisateur ou un site pour un equipement attribue.');
+            if ($isSiteAssignment && $siteAssignment === '') {
+                flash('error', 'Site requis pour une attribution vers site.');
                 remember_old_input($_POST);
                 redirect('equipements/' . $id . '/edit');
+            }
+
+            if (!$isSiteAssignment && $assigneeId <= 0) {
+                flash('error', 'Utilisateur requis pour un equipement attribue.');
+                remember_old_input($_POST);
+                redirect('equipements/' . $id . '/edit');
+            }
+
+            if ($isSiteAssignment) {
+                $assigneeId = 0;
+            } else {
+                $siteAssignment = '';
             }
         }
 
@@ -1074,21 +1115,28 @@ class EquipementController extends Controller
         $actorId = (int) (Auth::user()['id'] ?? 0) ?: null;
         $reasonSuffix = $statusReason !== '' ? (' | Motif: ' . $statusReason) : '';
 
+        $currentHolderId = $this->currentV2HolderId($db, $equipementId);
+
         if ($isPrinter && $siteAssignment !== '') {
+            if ($currentHolderId !== null) {
+                $this->closeV2Attribution($db, $equipementId);
+            }
             $this->equipements->setStatus($equipementId, 'attribue');
             $this->insertEquipmentHistory(
                 $db,
                 $equipementId,
-                'attribution',
-                null,
+                $currentHolderId === null ? 'attribution' : 'transfert',
+                $currentHolderId,
                 null,
                 'Affectation site: ' . $siteAssignment . $reasonSuffix,
-                $actorId
+                $actorId,
+                $currentHolderId === null ? 'depot' : 'utilisateur',
+                $currentHolderId === null ? $this->defaultDepot : null,
+                'site',
+                $siteAssignment
             );
             return;
         }
-
-        $currentHolderId = $this->currentV2HolderId($db, $equipementId);
 
         if ($status === 'attribue' && $destinationUserId > 0) {
             if ($currentHolderId !== null && $currentHolderId !== $destinationUserId) {
@@ -1204,7 +1252,11 @@ class EquipementController extends Controller
         ?int $sourceUserId,
         ?int $destinationUserId,
         string $commentaire,
-        ?int $actorId
+        ?int $actorId,
+        ?string $sourceType = null,
+        ?string $sourceLabel = null,
+        ?string $destinationType = null,
+        ?string $destinationLabel = null
     ): void {
         $allowed = ['creation', 'attribution', 'transfert', 'maintenance', 'retour_stock', 'declassement', 'modification_etat'];
         if (!in_array($operation, $allowed, true)) {
@@ -1212,15 +1264,23 @@ class EquipementController extends Controller
         }
 
         $stmt = $db->prepare('INSERT INTO historique_equipements (
-                equipement_id, type_operation, utilisateur_source_id, utilisateur_destination_id, quantite, commentaire, effectue_par
+                equipement_id, type_operation, utilisateur_source_id, utilisateur_destination_id,
+                source_type, source_label, destination_type, destination_label,
+                quantite, commentaire, effectue_par
             ) VALUES (
-                :equipement_id, :type_operation, :utilisateur_source_id, :utilisateur_destination_id, 1, :commentaire, :effectue_par
+                :equipement_id, :type_operation, :utilisateur_source_id, :utilisateur_destination_id,
+                :source_type, :source_label, :destination_type, :destination_label,
+                1, :commentaire, :effectue_par
             )');
         $stmt->execute([
             'equipement_id' => $equipementId,
             'type_operation' => $operation,
             'utilisateur_source_id' => $sourceUserId,
             'utilisateur_destination_id' => $destinationUserId,
+            'source_type' => $sourceType,
+            'source_label' => $sourceLabel,
+            'destination_type' => $destinationType,
+            'destination_label' => $destinationLabel,
             'commentaire' => $commentaire,
             'effectue_par' => $actorId,
         ]);

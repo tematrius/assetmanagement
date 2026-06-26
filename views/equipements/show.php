@@ -79,6 +79,13 @@ $attrs = $equipement['attributs'] ?? [];
                 <div class="profile-kv"><span>Departement</span><strong><?= e($currentHolder['departement']) ?></strong></div>
                 <div class="profile-kv"><span>Service</span><strong><?= e($currentHolder['service']) ?></strong></div>
                 <div class="profile-kv"><span>Site</span><strong><?= e($currentHolder['site']) ?></strong></div>
+            <?php elseif (!empty($currentSiteAssignment)): ?>
+                <div class="equipment-location equipment-location-depot">
+                    <i class="bi bi-building-check"></i>
+                    <div><small>Attribue au site</small><strong><?= e((string) $currentSiteAssignment) ?></strong></div>
+                </div>
+                <div class="profile-kv"><span>Type</span><strong>Site / agence</strong></div>
+                <div class="profile-kv"><span>Site</span><strong><?= e((string) $currentSiteAssignment) ?></strong></div>
             <?php else: ?>
                 <div class="equipment-location equipment-location-depot">
                     <i class="bi bi-building"></i>

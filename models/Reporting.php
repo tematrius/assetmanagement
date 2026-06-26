@@ -128,7 +128,21 @@ class Reporting extends Model
         foreach ($rows as $row) {
             $payload = json_decode((string) $row['justification'], true);
             foreach (is_array($payload['accessoires'] ?? null) ? $payload['accessoires'] : [] as $item) {
-                $counts[$item] = ($counts[$item] ?? 0) + 1;
+                $label = '';
+                $quantity = 1;
+
+                if (is_array($item)) {
+                    $label = trim((string) ($item['label'] ?? $item['nom'] ?? $item['categorie_nom'] ?? ''));
+                    $quantity = max(1, (int) ($item['quantite'] ?? $item['quantity'] ?? 1));
+                } else {
+                    $label = trim((string) $item);
+                }
+
+                if ($label === '') {
+                    continue;
+                }
+
+                $counts[$label] = ($counts[$label] ?? 0) + $quantity;
             }
         }
         arsort($counts);

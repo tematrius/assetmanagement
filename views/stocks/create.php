@@ -1,14 +1,29 @@
 <div class="card p-3">
+    <script>
+        window.ITAM_STOCK_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_UNICODE) ?>;
+    </script>
     <form method="POST" action="<?= e(base_url('stocks')) ?>" class="row g-3 needs-validation" novalidate id="stock-create-form">
         <?= csrf_field() ?>
         <div class="col-md-6">
-            <label class="form-label">Catégorie *</label>
-            <select name="categorie_id" id="stock-category-select" class="form-select" required data-attributes-url="<?= e(base_url('categories')) ?>">
-                <option value="">Selectionner</option>
-                <?php foreach ($categories as $category): ?>
-                    <option value="<?= (int) $category['id'] ?>" <?= old('categorie_id') === (string) $category['id'] ? 'selected' : '' ?>><?= e($category['nom']) ?> (<?= e($category['mode_gestion']) ?>)</option>
-                <?php endforeach; ?>
-            </select>
+            <label class="form-label">Categorie *</label>
+            <?php
+            $selectedCategoryId = old('categorie_id');
+            $selectedCategory = null;
+            foreach ($categories as $category) {
+                if ((string) $category['id'] === (string) $selectedCategoryId) {
+                    $selectedCategory = $category;
+                    break;
+                }
+            }
+            ?>
+            <div class="smart-picker" data-smart-category data-hidden-input="stock-category-select" data-categories-source="ITAM_STOCK_CATEGORIES">
+                <input type="text" id="stock_category_search" class="form-control" placeholder="Tapez quelques lettres: souris, casque, clavier..." autocomplete="off" value="<?= e($selectedCategory ? ($selectedCategory['nom'] . ' (' . $selectedCategory['mode_gestion'] . ')') : '') ?>">
+                <input type="hidden" name="categorie_id" id="stock-category-select" value="<?= e((string) $selectedCategoryId) ?>" required data-attributes-url="<?= e(base_url('categories')) ?>">
+                <div class="assignment-results" data-category-results></div>
+                <div class="smart-picker-selected" data-category-selected style="<?= $selectedCategory ? '' : 'display:none;' ?>">
+                    <i class="bi bi-tag"></i><span><?= e($selectedCategory ? ($selectedCategory['nom'] . ' - ' . $selectedCategory['mode_gestion']) : '') ?></span>
+                </div>
+            </div>
         </div>
         <div class="col-md-6">
             <label class="form-label">Designation / reference *</label>
@@ -41,7 +56,7 @@
             <div class="p-3 border rounded">
                 <h6 class="mb-2">Quantites par etat</h6>
                 <div class="row g-2">
-                    <?php foreach (['neuf' => 'Neuf', 'bon' => 'Bon', 'mauvais' => 'Mauvais', 'declasse' => 'Declassé'] as $etat => $label): ?>
+                    <?php foreach (['neuf' => 'Neuf', 'bon' => 'Bon', 'mauvais' => 'Mauvais', 'declasse' => 'Declasse'] as $etat => $label): ?>
                         <div class="col-md-3">
                             <label class="form-label"><?= e($label) ?></label>
                             <input type="number" min="0" name="states[<?= e($etat) ?>]" class="form-control" value="<?= e(old('states[' . $etat . ']', '0')) ?>">
@@ -62,13 +77,19 @@
 document.addEventListener('DOMContentLoaded', () => {
     const select = document.getElementById('stock-category-select');
     const container = document.getElementById('stock-attributes-container');
-    const categories = <?= json_encode($categories, JSON_UNESCAPED_UNICODE) ?>;
+
+    const escapeHtml = (value) => (value || '')
+        .toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 
     const render = () => {
-        const categoryId = select.value;
-        const category = categories.find((item) => String(item.id) === String(categoryId));
+        const categoryId = select ? select.value : '';
 
-        if (!category) {
+        if (!categoryId) {
             container.innerHTML = '<p class="text-muted mb-0">Selectionne une categorie pour afficher les attributs.</p>';
             return;
         }
@@ -90,12 +111,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (type === 'liste') {
                         return `
                             <div class="col-md-4">
-                                <label class="form-label">${attr.nom}${requiredMark}</label>
+                                <label class="form-label">${escapeHtml(attr.nom)}${requiredMark}</label>
                                 <select class="form-select" name="attributes[valeur][]">
                                     <option value="">Selectionner</option>
-                                    ${options.map((opt) => `<option value="${opt.label}">${opt.label}</option>`).join('')}
+                                    ${options.map((opt) => `<option value="${escapeHtml(opt.label)}">${escapeHtml(opt.label)}</option>`).join('')}
                                 </select>
-                                <input type="hidden" name="attributes[nom][]" value="${attr.id}">
+                                <input type="hidden" name="attributes[nom][]" value="${escapeHtml(attr.id)}">
                             </div>
                         `;
                     }
@@ -103,18 +124,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (type === 'date') {
                         return `
                             <div class="col-md-4">
-                                <label class="form-label">${attr.nom}${requiredMark}</label>
+                                <label class="form-label">${escapeHtml(attr.nom)}${requiredMark}</label>
                                 <input type="date" class="form-control" name="attributes[valeur][]">
-                                <input type="hidden" name="attributes[nom][]" value="${attr.id}">
+                                <input type="hidden" name="attributes[nom][]" value="${escapeHtml(attr.id)}">
                             </div>
                         `;
                     }
 
                     return `
                         <div class="col-md-4">
-                            <label class="form-label">${attr.nom}${requiredMark}</label>
+                            <label class="form-label">${escapeHtml(attr.nom)}${requiredMark}</label>
                             <input class="form-control" name="attributes[valeur][]" placeholder="Valeur">
-                            <input type="hidden" name="attributes[nom][]" value="${attr.id}">
+                            <input type="hidden" name="attributes[nom][]" value="${escapeHtml(attr.id)}">
                         </div>
                     `;
                 }).join('');
@@ -124,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     };
 
-    if (select) {
+    if (select && container) {
         select.addEventListener('change', render);
         render();
     }

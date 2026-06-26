@@ -47,6 +47,64 @@ class Stock extends Model
         return $this->db->query($sql)->fetchAll();
     }
 
+    public function managerAnalytics(): array
+    {
+        $stocks = $this->all();
+        $totals = [
+            'total' => 0,
+            'disponible' => 0,
+            'attribue' => 0,
+            'maintenance' => 0,
+            'mauvais' => 0,
+            'declasse' => 0,
+        ];
+        $categories = [];
+        $lowStock = [];
+        $consumption = [];
+
+        foreach ($stocks as $stock) {
+            $total = (int) ($stock['q_total'] ?? 0);
+            $available = (int) ($stock['q_bon'] ?? 0);
+            $assigned = (int) ($stock['quantite_attribuee'] ?? 0);
+            $totals['total'] += $total;
+            $totals['disponible'] += $available;
+            $totals['attribue'] += $assigned;
+            $totals['maintenance'] += (int) ($stock['quantite_maintenance'] ?? 0);
+            $totals['mauvais'] += (int) ($stock['q_mauvais'] ?? 0);
+            $totals['declasse'] += (int) ($stock['q_declasse'] ?? 0);
+
+            $category = (string) $stock['categorie_nom'];
+            if (!isset($categories[$category])) {
+                $categories[$category] = ['label' => $category, 'total' => 0, 'disponible' => 0, 'attribue' => 0];
+            }
+            $categories[$category]['total'] += $total;
+            $categories[$category]['disponible'] += $available;
+            $categories[$category]['attribue'] += $assigned;
+
+            $availabilityRate = $total > 0 ? (int) round(($available / $total) * 100) : 0;
+            $stock['availability_rate'] = $availabilityRate;
+            $stock['consumption_rate'] = $total > 0 ? (int) round(($assigned / $total) * 100) : 0;
+            if ($total > 0 && ($availabilityRate <= 20 || $available <= 3)) {
+                $lowStock[] = $stock;
+            }
+            $consumption[] = $stock;
+        }
+
+        usort($lowStock, static fn (array $a, array $b): int => $a['availability_rate'] <=> $b['availability_rate']);
+        usort($consumption, static fn (array $a, array $b): int => $b['consumption_rate'] <=> $a['consumption_rate']);
+
+        return [
+            'totals' => $totals,
+            'references' => count($stocks),
+            'availabilityRate' => $totals['total'] > 0 ? (int) round(($totals['disponible'] / $totals['total']) * 100) : 0,
+            'assignmentRate' => $totals['total'] > 0 ? (int) round(($totals['attribue'] / $totals['total']) * 100) : 0,
+            'lowStockCount' => count($lowStock),
+            'lowStock' => array_slice($lowStock, 0, 6),
+            'topConsumption' => array_slice($consumption, 0, 6),
+            'categories' => array_values($categories),
+        ];
+    }
+
     public function find(int $id): ?array
     {
         $stmt = $this->db->prepare("SELECT s.id,

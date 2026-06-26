@@ -17,6 +17,8 @@ class DashboardController extends Controller
             'isItStaff' => $isItStaff,
             'stats' => $isItStaff ? $dashboard->stats() : $portal->summary(Auth::id()),
             'operations' => $isItStaff ? $dashboard->operations() : [],
+            'pilotage' => $isItStaff ? $dashboard->managerPilotage() : [],
+            'personalInsights' => (!$isItStaff || $showPersonalArea) ? $portal->dashboardInsights(Auth::id()) : [],
             'myEquipment' => (!$isItStaff || $showPersonalArea) ? array_slice($portal->equipmentFor(Auth::id()), 0, 5) : [],
             'myRequests' => (!$isItStaff || $showPersonalArea) ? array_slice($portal->requestsFor(Auth::id()), 0, 5) : [],
             'personalStats' => $showPersonalArea ? $portal->summary(Auth::id()) : [],

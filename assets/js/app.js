@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const assignmentSite = document.getElementById('site_attribution');
     const assignmentUserBlock = document.getElementById('assignment-user-block');
     const assignmentSiteBlock = document.getElementById('assignment-site-block');
+    const assignmentTargetControls = document.querySelectorAll('input[name="assignment_target_type"]');
     const equipementSourceType = document.getElementById('equipement_source_type');
     const equipementSourceLabel = document.getElementById('equipement_source_label');
     const equipementDestinationType = document.getElementById('equipement_destination_type');
@@ -49,6 +50,90 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const isPrinterCategory = () => normalize(currentCategoryName).includes('imprimante');
 
+    document.querySelectorAll('[data-smart-category]').forEach((picker) => {
+        const hiddenId = picker.dataset.hiddenInput || 'categorie_id';
+        const sourceName = picker.dataset.categoriesSource || 'ITAM_CATEGORIES';
+        const categories = Array.isArray(window[sourceName]) ? window[sourceName] : [];
+        const search = picker.querySelector('input[type="text"]');
+        const hidden = document.getElementById(hiddenId);
+        const results = picker.querySelector('[data-category-results]');
+        const selectedWrap = picker.querySelector('[data-category-selected]');
+        const selectedLabel = selectedWrap ? selectedWrap.querySelector('span') : null;
+
+        if (!search || !hidden || !results) {
+            return;
+        }
+
+        const labelFor = (category) => `${category.nom} (${category.mode_gestion || category.type_gestion || 'unique'})`;
+        const selectCategory = (category) => {
+            hidden.value = category ? String(category.id) : '';
+            search.value = category ? labelFor(category) : '';
+            if (selectedWrap && selectedLabel) {
+                selectedLabel.textContent = category ? `${category.nom} - ${category.mode_gestion || category.type_gestion || 'unique'}` : '';
+                selectedWrap.style.display = category ? 'inline-flex' : 'none';
+            }
+            results.innerHTML = '';
+            results.style.display = 'none';
+            hidden.dispatchEvent(new Event('change', {bubbles: true}));
+        };
+
+        const renderCategoryResults = () => {
+            const q = normalize(search.value);
+            hidden.value = '';
+            if (selectedWrap) {
+                selectedWrap.style.display = 'none';
+            }
+            if (q.length === 0) {
+                results.innerHTML = '';
+                results.style.display = 'none';
+                hidden.dispatchEvent(new Event('change', {bubbles: true}));
+                return;
+            }
+
+            const matches = categories.filter((category) => normalize(`${category.nom} ${category.mode_gestion || category.type_gestion || ''}`).includes(q)).slice(0, 10);
+            if (!matches.length) {
+                results.innerHTML = '<div class="assignment-result-item text-muted">Aucune categorie trouvee</div>';
+                results.style.display = 'block';
+                hidden.dispatchEvent(new Event('change', {bubbles: true}));
+                return;
+            }
+
+            results.innerHTML = matches.map((category) => `
+                <button type="button" class="assignment-result-item" data-category-id="${escapeHtml(category.id)}">
+                    <strong>${escapeHtml(category.nom)}</strong>
+                    <small>${escapeHtml(category.mode_gestion || category.type_gestion || 'unique')}</small>
+                </button>
+            `).join('');
+            results.style.display = 'block';
+            hidden.dispatchEvent(new Event('change', {bubbles: true}));
+        };
+
+        search.addEventListener('input', renderCategoryResults);
+        results.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) {
+                return;
+            }
+            const item = target.closest('[data-category-id]');
+            if (!(item instanceof HTMLElement)) {
+                return;
+            }
+            const category = categories.find((entry) => String(entry.id) === String(item.dataset.categoryId));
+            if (category) {
+                selectCategory(category);
+            }
+        });
+        document.addEventListener('click', (event) => {
+            const target = event.target;
+            if (!(target instanceof Node)) {
+                return;
+            }
+            if (!picker.contains(target)) {
+                results.style.display = 'none';
+            }
+        });
+    });
+
     const syncAssignmentPanel = () => {
         if (!statusSelect || !assignmentPanel) {
             return;
@@ -68,12 +153,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const isAssigned = statusSelect.value === 'attribue';
         assignmentPanel.style.display = isAssigned ? '' : 'none';
 
-        const printer = isPrinterCategory();
+        const selectedTarget = Array.from(assignmentTargetControls).find((input) => input.checked);
+        const targetType = selectedTarget ? selectedTarget.value : (isPrinterCategory() ? 'site' : 'personne');
         if (assignmentUserBlock) {
-            assignmentUserBlock.style.display = isAssigned && !printer ? '' : 'none';
+            assignmentUserBlock.style.display = isAssigned && targetType !== 'site' ? '' : 'none';
         }
         if (assignmentSiteBlock) {
-            assignmentSiteBlock.style.display = isAssigned && printer ? '' : 'none';
+            assignmentSiteBlock.style.display = isAssigned && targetType === 'site' ? '' : 'none';
         }
 
         if (!isAssigned) {
@@ -83,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (assignmentSite) {
                 assignmentSite.value = '';
             }
-        } else if (printer) {
+        } else if (targetType === 'site') {
             if (assignmentUser) {
                 assignmentUser.value = '';
             }
@@ -389,6 +475,21 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshSelectedSite();
     }
 
+    const syncAssignmentBeforeSubmit = () => {
+        if (!statusSelect || !assignmentSite || !assignmentSiteSearch) {
+            return;
+        }
+
+        const selectedTarget = Array.from(assignmentTargetControls).find((input) => input.checked);
+        const targetType = selectedTarget ? selectedTarget.value : 'personne';
+        if (statusSelect.value === 'attribue' && targetType === 'site' && assignmentSite.value.trim() === '') {
+            const typed = assignmentSiteSearch.value.trim();
+            if (typed !== '') {
+                assignmentSite.value = typed;
+            }
+        }
+    };
+
     forms.forEach((form) => {
         form.addEventListener('submit', (event) => {
             if (currentCategoryMode === 'quantite') {
@@ -399,17 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!categorySelect || !statusSelect || !assignmentSite || !assignmentSiteSearch) {
-                return;
-            }
-
-            const isAssigned = statusSelect.value === 'attribue';
-            if (isAssigned && isPrinterCategory() && assignmentSite.value.trim() === '') {
-                const typed = assignmentSiteSearch.value.trim();
-                if (typed !== '') {
-                    assignmentSite.value = typed;
-                }
-            }
+            syncAssignmentBeforeSubmit();
         });
     });
 
@@ -597,17 +688,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!categorySelect || !statusSelect || !assignmentSite || !assignmentSiteSearch) {
-                return;
-            }
-
-            const isAssigned = statusSelect.value === 'attribue';
-            if (isAssigned && isPrinterCategory() && assignmentSite.value.trim() === '') {
-                const typed = assignmentSiteSearch.value.trim();
-                if (typed !== '') {
-                    assignmentSite.value = typed;
-                }
-            }
+            syncAssignmentBeforeSubmit();
         });
     });
 
@@ -1257,6 +1338,27 @@ if (validationSearch && validationItems.length > 0) {
             validationEmpty.hidden = visibleCount !== 0;
         }
     };
+
+    assignmentTargetControls.forEach((input) => {
+        input.addEventListener('change', syncAssignmentPanel);
+    });
+    document.querySelectorAll('.assignment-target-selector label').forEach((label) => {
+        label.addEventListener('click', () => {
+            window.setTimeout(syncAssignmentPanel, 0);
+        });
+    });
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.closest('.assignment-target-selector')) {
+            window.setTimeout(syncAssignmentPanel, 0);
+        }
+    }, true);
+    document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (target instanceof HTMLInputElement && target.name === 'assignment_target_type') {
+            syncAssignmentPanel();
+        }
+    }, true);
 
     validationSearch.addEventListener('input', refreshValidationQueue);
     validationFilters.forEach((button) => {

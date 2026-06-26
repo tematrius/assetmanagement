@@ -73,6 +73,7 @@ class StockController extends Controller
         $this->view('stocks/index', [
             'title' => 'Stock',
             'stocks' => $this->stocks->all(),
+            'analytics' => $this->stocks->managerAnalytics(),
         ]);
     }
 

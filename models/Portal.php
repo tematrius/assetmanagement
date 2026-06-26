@@ -32,6 +32,45 @@ class Portal extends Model
         ];
     }
 
+    public function dashboardInsights(int $userId): array
+    {
+        return [
+            'requestStatus' => $this->preparedRows(
+                "SELECT statut AS label, COUNT(*) AS total FROM demandes WHERE demandeur_id = :id GROUP BY statut ORDER BY total DESC",
+                ['id' => $userId]
+            ),
+            'requestTrend' => array_reverse($this->preparedRows(
+                "SELECT DATE_FORMAT(created_at, '%Y-%m') AS month_key,
+                        DATE_FORMAT(created_at, '%m/%Y') AS label,
+                        COUNT(*) AS total
+                 FROM demandes
+                 WHERE demandeur_id = :id
+                 GROUP BY month_key, label
+                 ORDER BY month_key DESC
+                 LIMIT 6",
+                ['id' => $userId]
+            )),
+            'equipmentMix' => [
+                ['label' => 'Individuels', 'total' => $this->countPrepared("SELECT COUNT(*) FROM attributions WHERE utilisateur_id = :id AND equipement_id IS NOT NULL AND statut = 'active'", ['id' => $userId])],
+                ['label' => 'Accessoires', 'total' => $this->countPrepared("SELECT COALESCE(SUM(quantite), 0) FROM attributions WHERE utilisateur_id = :id AND stock_quantitatif_id IS NOT NULL AND statut = 'active'", ['id' => $userId])],
+            ],
+            'validationStatus' => $this->preparedRows(
+                "SELECT statut AS label, COUNT(*) AS total FROM demandes WHERE validateur_id = :id GROUP BY statut ORDER BY total DESC",
+                ['id' => $userId]
+            ),
+            'upcomingActions' => $this->preparedRows(
+                "SELECT d.id, d.statut, d.urgence, d.created_at, u.nom_complet AS demandeur_nom, c.nom AS categorie_nom
+                 FROM demandes d
+                 JOIN utilisateurs u ON u.id = d.demandeur_id
+                 LEFT JOIN categories_equipements c ON c.id = d.categorie_id
+                 WHERE d.validateur_id = :id AND d.statut IN ('soumis','validation_responsable')
+                 ORDER BY FIELD(d.urgence, 'haute', 'normale', 'faible'), d.created_at ASC
+                 LIMIT 5",
+                ['id' => $userId]
+            ),
+        ];
+    }
+
     public function equipmentFor(int $userId): array
     {
         $unique = $this->db->prepare("SELECT 'unique' AS type_ligne, a.id AS attribution_id,
@@ -135,5 +174,19 @@ class Portal extends Model
         }
         $row['accessoires_text'] = implode(', ', $accessoryLabels);
         return $row;
+    }
+
+    private function preparedRows(string $sql, array $params): array
+    {
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    private function countPrepared(string $sql, array $params): int
+    {
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
     }
 }
