@@ -10,6 +10,9 @@ foreach ($categories as $category) {
         break;
     }
 }
+$equipmentListBaseUrl = ($showAssets && $selectedCategory)
+    ? base_url('equipements/categories/' . (int) $selectedCategory['id'])
+    : base_url('equipements');
 
 $categoryIcon = static function (string $name): string {
     $name = strtolower($name);
@@ -37,6 +40,7 @@ $statusLabel = static fn (string $status): string => match ($status) {
 <script>
 window.ITAM_EQUIPMENT_USERS = <?= json_encode($utilisateurs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+window.ITAM_EQUIPMENT_CATEGORY_BASE = <?= json_encode(base_url('equipements/categories'), JSON_UNESCAPED_SLASHES) ?>;
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 
@@ -51,10 +55,10 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
     </div>
 </div>
 
-<form class="equipment-search-panel" method="GET" action="<?= e(base_url('equipements')) ?>">
+<form class="equipment-search-panel" method="GET" action="<?= e($equipmentListBaseUrl) ?>">
     <div class="equipment-search-main">
         <i class="bi bi-search"></i>
-        <input name="q" value="<?= e((string) ($filters['q'] ?? '')) ?>" placeholder="Rechercher par categorie, serie, code inventaire, marque, modele, utilisateur ou PF">
+        <input name="q" value="<?= e((string) ($filters['q'] ?? '')) ?>" placeholder="<?= $showAssets ? 'Rechercher dans cette categorie: SN, inventaire, marque, modele, utilisateur, PF ou attribut' : 'Rechercher une categorie ou un equipement' ?>">
         <?php if (!empty($filters['q'])): ?>
             <a href="<?= e(base_url('equipements') . '?' . query_with(['q' => null, 'page' => 1])) ?>" title="Effacer la recherche"><i class="bi bi-x-lg"></i></a>
         <?php endif; ?>
@@ -62,8 +66,8 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
     <div class="equipment-filter-row">
         <div class="equipment-smart-filter">
             <i class="bi bi-grid"></i>
-            <input id="equipment-category-search" value="<?= e((string) ($selectedCategory['nom'] ?? '')) ?>" placeholder="Toutes les categories" autocomplete="off">
-            <input type="hidden" id="equipment-category-id" name="categorie_id" value="<?= e((string) ($filters['categorie_id'] ?? '')) ?>">
+            <input id="equipment-category-search" value="<?= e((string) ($selectedCategory['nom'] ?? '')) ?>" placeholder="Tapez une categorie puis cliquez dessus" autocomplete="off">
+            <input type="hidden" id="equipment-category-id" value="<?= e((string) ($filters['categorie_id'] ?? '')) ?>">
             <div id="equipment-category-results" class="smart-results"></div>
         </div>
         <select name="statut" class="form-select">
@@ -79,6 +83,9 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
             <option value="statut" <?= ($filters['sort_by'] ?? '') === 'statut' ? 'selected' : '' ?>>Statut</option>
         </select>
         <input type="hidden" name="sort_dir" value="<?= e((string) ($filters['sort_dir'] ?? 'DESC')) ?>">
+        <?php if (!$showAssets): ?>
+            <input type="hidden" name="categorie_id" value="<?= e((string) ($filters['categorie_id'] ?? '')) ?>">
+        <?php endif; ?>
         <button class="btn btn-primary"><i class="bi bi-funnel"></i> Filtrer</button>
         <a class="btn btn-outline-secondary" href="<?= e(base_url('equipements')) ?>" title="Reinitialiser"><i class="bi bi-arrow-counterclockwise"></i></a>
     </div>
@@ -93,7 +100,7 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
 
 <section class="asset-intelligence">
     <div class="asset-intelligence-heading">
-        <div><h3>Vue de pilotage du parc</h3><p>Disponibilite, utilisation, qualite des donnees et actifs a surveiller.</p></div>
+        <div><h3><?= $selectedCategory ? 'Analyse categorie: ' . e((string) $selectedCategory['nom']) : 'Vue de pilotage du parc' ?></h3><p><?= $selectedCategory ? 'Statuts, etats, disponibilite et points d attention de cette famille.' : 'Disponibilite, utilisation, qualite des donnees et actifs a surveiller.' ?></p></div>
         <span>Mis a jour en temps reel</span>
     </div>
     <div class="asset-decision-kpis">
@@ -132,7 +139,7 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
     <div class="section-heading">
         <div>
             <h3>Categories d'equipements individuels</h3>
-            <small class="text-muted">Ouvrez une categorie pour isoler son parc et ses indicateurs.</small>
+            <small class="text-muted">Tapez le nom d une categorie ou cliquez sur une carte pour ouvrir son parc.</small>
         </div>
         <?php if ($selectedCategory): ?>
             <a class="btn btn-sm btn-outline-secondary" href="<?= e(base_url('equipements') . '?' . query_with(['categorie_id' => null, 'page' => 1])) ?>">Voir toutes</a>
@@ -176,8 +183,8 @@ window.ITAM_EQUIPMENT_CATEGORIES = <?= json_encode($categories, JSON_UNESCAPED_U
             <h3><?= $selectedCategory ? e((string) $selectedCategory['nom']) : 'Tous les equipements individuels' ?></h3>
             <small class="text-muted"><?= (int) ($pagination['total'] ?? 0) ?> actif(s) correspondant aux filtres.</small>
         </div>
-        <form method="GET" action="<?= e(base_url('equipements')) ?>" class="d-flex align-items-center gap-2">
-            <?php foreach (['q', 'categorie_id', 'statut', 'sort_by', 'sort_dir'] as $field): ?>
+        <form method="GET" action="<?= e($equipmentListBaseUrl) ?>" class="d-flex align-items-center gap-2">
+            <?php foreach (['q', 'statut', 'sort_by', 'sort_dir'] as $field): ?>
                 <input type="hidden" name="<?= e($field) ?>" value="<?= e((string) ($filters[$field] ?? '')) ?>">
             <?php endforeach; ?>
             <label class="small text-muted text-nowrap" for="per_page">Par page</label>
@@ -281,15 +288,15 @@ $totalPages = (int) ($pagination['totalPages'] ?? 1);
     <nav class="mt-4 d-flex justify-content-center">
         <ul class="pagination mb-0">
             <li class="page-item <?= $currentPage <= 1 ? 'disabled' : '' ?>">
-                <a class="page-link" href="<?= e(base_url('equipements') . '?' . query_with(['page' => max(1, $currentPage - 1)])) ?>">Precedent</a>
+                <a class="page-link" href="<?= e($equipmentListBaseUrl . '?' . query_with(['page' => max(1, $currentPage - 1), 'categorie_id' => null])) ?>">Precedent</a>
             </li>
             <?php for ($page = 1; $page <= $totalPages; $page++): ?>
                 <li class="page-item <?= $page === $currentPage ? 'active' : '' ?>">
-                    <a class="page-link" href="<?= e(base_url('equipements') . '?' . query_with(['page' => $page])) ?>"><?= $page ?></a>
+                    <a class="page-link" href="<?= e($equipmentListBaseUrl . '?' . query_with(['page' => $page, 'categorie_id' => null])) ?>"><?= $page ?></a>
                 </li>
             <?php endfor; ?>
             <li class="page-item <?= $currentPage >= $totalPages ? 'disabled' : '' ?>">
-                <a class="page-link" href="<?= e(base_url('equipements') . '?' . query_with(['page' => min($totalPages, $currentPage + 1)])) ?>">Suivant</a>
+                <a class="page-link" href="<?= e($equipmentListBaseUrl . '?' . query_with(['page' => min($totalPages, $currentPage + 1), 'categorie_id' => null])) ?>">Suivant</a>
             </li>
         </ul>
     </nav>
@@ -322,6 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
             categoryId.value = category.id;
             categorySearch.value = category.nom;
             categoryResults.style.display = 'none';
+            window.location.href = `${window.ITAM_EQUIPMENT_CATEGORY_BASE}/${category.id}`;
         });
     }
 

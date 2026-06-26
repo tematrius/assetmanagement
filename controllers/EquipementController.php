@@ -110,8 +110,8 @@ class EquipementController extends Controller
             'filters' => $filters,
             'pagination' => $result,
             'perPageOptions' => [12, 24, 48, 96],
-            'stats' => $this->equipements->stats(),
-            'analytics' => $this->equipements->managerAnalytics(),
+            'stats' => $this->equipements->stats((int) $category['id']),
+            'analytics' => $this->equipements->managerAnalytics((int) $category['id']),
             'showAssets' => true,
         ]);
     }

@@ -15,6 +15,7 @@ class ReportingController extends Controller
 
         $siteResult = $this->paginateRows($reporting->bySite($filters), $sitePage, 10);
         $departementResult = $this->paginateRows($reporting->byDepartement($filters), $departementPage, 10);
+        $directionRows = $reporting->byDirection($filters);
 
         $this->view('reporting/index', [
             'title' => 'Reporting',
@@ -31,6 +32,7 @@ class ReportingController extends Controller
             'sla' => $reporting->sla($filters),
             'bySite' => $siteResult['rows'],
             'byDepartement' => $departementResult['rows'],
+            'byDirection' => $directionRows,
             'sitePagination' => $siteResult,
             'departementPagination' => $departementResult,
         ]);
@@ -103,6 +105,7 @@ class ReportingController extends Controller
 
         return [
             'site' => trim((string) ($_GET['site'] ?? '')),
+            'direction' => trim((string) ($_GET['direction'] ?? '')),
             'departement' => trim((string) ($_GET['departement'] ?? '')),
             'type' => trim((string) ($_GET['type'] ?? '')),
             'date_from' => trim((string) ($_GET['date_from'] ?? '')),

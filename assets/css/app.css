@@ -2514,6 +2514,106 @@ a.metric-card:hover {
     background: linear-gradient(90deg, #c8102e 0%, #8d0b21 100%);
 }
 
+.reporting-filter-band {
+    margin-bottom: 16px;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #e2e5e9;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+
+.reporting-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr)) auto;
+    gap: 10px;
+    align-items: end;
+}
+
+.reporting-filter-grid label {
+    display: grid;
+    gap: 5px;
+    color: #66707a;
+    font-size: 0.72rem;
+    font-weight: 750;
+}
+
+.reporting-command {
+    margin-top: 0;
+}
+
+.reporting-insights {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.reporting-insight-card {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    min-width: 0;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #e2e5e9;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+
+.reporting-insight-card > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    background: #edf5fb;
+    color: #2d6f9d;
+    font-size: 1.1rem;
+}
+
+.reporting-insight-card small,
+.reporting-insight-card strong,
+.reporting-insight-card p {
+    display: block;
+    margin: 0;
+}
+
+.reporting-insight-card small {
+    color: #747c85;
+    font-weight: 800;
+}
+
+.reporting-insight-card strong {
+    margin-top: 2px;
+    color: #151515;
+    font-size: 1.05rem;
+    overflow-wrap: anywhere;
+}
+
+.reporting-insight-card p {
+    margin-top: 4px;
+    color: #747c85;
+    font-size: 0.82rem;
+}
+
+.reporting-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.reporting-chart-grid .dashboard-panel.wide {
+    grid-column: span 2;
+}
+
+.reporting-bottom {
+    margin-bottom: 10px;
+}
+
 #statusChart,
 #trendChart {
     width: 100%;
@@ -2577,6 +2677,19 @@ a.metric-card:hover {
     #statusChart,
     #trendChart {
         max-height: 220px;
+    }
+
+    .reporting-filter-grid,
+    .reporting-chart-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .reporting-chart-grid .dashboard-panel.wide {
+        grid-column: 1 / -1;
+    }
+
+    .reporting-insights {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -2917,6 +3030,15 @@ a.metric-card:hover {
     .request-cart-item {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .reporting-filter-grid,
+    .reporting-chart-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .reporting-chart-grid .dashboard-panel.wide {
+        grid-column: auto;
     }
 }
 

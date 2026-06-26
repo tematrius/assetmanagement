@@ -7,10 +7,12 @@ class Reporting extends Model
     public function filterOptions(): array
     {
         $sites = $this->db->query("SELECT DISTINCT agence AS value FROM utilisateurs WHERE COALESCE(agence, '') <> '' ORDER BY agence")->fetchAll();
+        $directions = $this->db->query("SELECT DISTINCT direction AS value FROM utilisateurs WHERE COALESCE(direction, '') <> '' ORDER BY direction")->fetchAll();
         $departments = $this->db->query("SELECT DISTINCT departement AS value FROM utilisateurs WHERE COALESCE(departement, '') <> '' ORDER BY departement")->fetchAll();
         $types = $this->db->query('SELECT nom FROM categories_equipements ORDER BY nom')->fetchAll();
         return [
             'sites' => array_column($sites, 'value'),
+            'directions' => array_column($directions, 'value'),
             'departements' => array_column($departments, 'value'),
             'types' => array_column($types, 'nom'),
         ];
@@ -105,6 +107,12 @@ class Reporting extends Model
         return $this->rows("SELECT COALESCE(u.departement, 'Non attribue') departement, COUNT(DISTINCT e.id) total, COUNT(DISTINCT e.id) equipements_total" . $this->equipmentBase() . $where . " GROUP BY COALESCE(u.departement, 'Non attribue') ORDER BY departement", $params);
     }
 
+    public function byDirection(array $filters = []): array
+    {
+        [$where, $params] = $this->equipmentFilters($filters);
+        return $this->rows("SELECT COALESCE(u.direction, 'Non attribue') direction, COUNT(DISTINCT e.id) total, COUNT(DISTINCT e.id) equipements_total" . $this->equipmentBase() . $where . " GROUP BY COALESCE(u.direction, 'Non attribue') ORDER BY total DESC, direction", $params);
+    }
+
     public function topUsers(array $filters = [], int $limit = 10): array
     {
         [$where, $params] = $this->equipmentFilters($filters);
@@ -185,6 +193,10 @@ class Reporting extends Model
             $conditions[] = 'u.departement = :department';
             $params['department'] = $filters['departement'];
         }
+        if (($filters['direction'] ?? '') !== '') {
+            $conditions[] = 'u.direction = :direction';
+            $params['direction'] = $filters['direction'];
+        }
         if (($filters['type'] ?? '') !== '') {
             $conditions[] = 'c.nom = :type';
             $params['type'] = $filters['type'];
@@ -203,6 +215,10 @@ class Reporting extends Model
         if (($filters['departement'] ?? '') !== '') {
             $conditions[] = 'ud.departement = :d_department';
             $params['d_department'] = $filters['departement'];
+        }
+        if (($filters['direction'] ?? '') !== '') {
+            $conditions[] = 'ud.direction = :d_direction';
+            $params['d_direction'] = $filters['direction'];
         }
         if (($filters['date_from'] ?? '') !== '') {
             $conditions[] = 'd.created_at >= :d_from';
@@ -226,6 +242,10 @@ class Reporting extends Model
         if (($filters['departement'] ?? '') !== '') {
             $conditions[] = 'u.departement = :h_department';
             $params['h_department'] = $filters['departement'];
+        }
+        if (($filters['direction'] ?? '') !== '') {
+            $conditions[] = 'u.direction = :h_direction';
+            $params['h_direction'] = $filters['direction'];
         }
         if (($filters['type'] ?? '') !== '') {
             $conditions[] = 'c.nom = :h_type';

@@ -52,7 +52,14 @@ class Equipement extends Model
                 OR e.modele LIKE :q_model
                 OR c.nom LIKE :q_category
                 OR u.nom_complet LIKE :q_user
-                OR u.matricule LIKE :q_pf)';
+                OR u.matricule LIKE :q_pf
+                OR EXISTS (
+                    SELECT 1
+                    FROM valeurs_caracteristiques_equipements vq
+                    JOIN caracteristiques_categories cq ON cq.id = vq.caracteristique_id
+                    WHERE vq.equipement_id = e.id
+                      AND (vq.valeur LIKE :q_attr_value OR cq.nom LIKE :q_attr_name)
+                ))';
             $search = '%' . $query . '%';
             $params['q_serial'] = $search;
             $params['q_inventory'] = $search;
@@ -62,6 +69,8 @@ class Equipement extends Model
             $params['q_category'] = $search;
             $params['q_user'] = $search;
             $params['q_pf'] = $search;
+            $params['q_attr_value'] = $search;
+            $params['q_attr_name'] = $search;
         }
 
         if (!empty($filters['serial_number'])) {
@@ -202,7 +211,7 @@ class Equipement extends Model
         return $stmt->fetchAll();
     }
 
-    public function stats(): array
+    public function stats(?int $categoryId = null): array
     {
         $sql = "SELECT
                     COUNT(*) AS total,
@@ -210,9 +219,14 @@ class Equipement extends Model
                     SUM(CASE WHEN statut = 'attribue' THEN 1 ELSE 0 END) AS attribue,
                     SUM(CASE WHEN statut = 'maintenance' THEN 1 ELSE 0 END) AS maintenance
                 FROM equipements";
+        $params = [];
+        if ($categoryId !== null && $categoryId > 0) {
+            $sql .= ' WHERE categorie_id = :category_id';
+            $params['category_id'] = $categoryId;
+        }
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute();
+        $stmt->execute($params);
         $row = $stmt->fetch();
 
         return [
@@ -223,17 +237,24 @@ class Equipement extends Model
         ];
     }
 
-    public function managerAnalytics(): array
+    public function managerAnalytics(?int $categoryId = null): array
     {
-        $rows = $this->db->query(
-            "SELECT e.id, e.serial_number, e.code_inventaire, e.designation, e.statut, e.etat,
+        $sql = "SELECT e.id, e.serial_number, e.code_inventaire, e.designation, e.statut, e.etat,
                     e.date_achat, e.date_mise_service, e.date_fiabilite, e.annee_estimee,
                     c.id AS categorie_id, c.nom AS categorie_nom
              FROM equipements e
              JOIN categories_equipements c ON c.id = e.categorie_id
-             WHERE c.type_gestion = 'unique'
-             ORDER BY e.id DESC"
-        )->fetchAll();
+             WHERE c.type_gestion = 'unique'";
+        $params = [];
+        if ($categoryId !== null && $categoryId > 0) {
+            $sql .= ' AND c.id = :category_id';
+            $params['category_id'] = $categoryId;
+        }
+        $sql .= ' ORDER BY e.id DESC';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
 
         $status = ['disponible' => 0, 'attribue' => 0, 'maintenance' => 0, 'declasse' => 0];
         $states = ['neuf' => 0, 'bon' => 0, 'moyen' => 0, 'mauvais' => 0, 'declasse' => 0];
@@ -279,11 +300,11 @@ class Equipement extends Model
             'availabilityRate' => $total > 0 ? (int) round(($status['disponible'] / $total) * 100) : 0,
             'attentionCount' => count($attention),
             'attention' => array_slice($attention, 0, 6),
-            'categories' => $this->categoryOverview(),
+            'categories' => $this->categoryOverview($categoryId),
         ];
     }
 
-    public function categoryOverview(): array
+    public function categoryOverview(?int $categoryId = null): array
     {
         $sql = "SELECT c.id,
                        c.nom,
@@ -296,11 +317,18 @@ class Equipement extends Model
                        MAX(e.created_at) AS dernier_ajout
                 FROM categories_equipements c
                 LEFT JOIN equipements e ON e.categorie_id = c.id
-                WHERE c.type_gestion = 'unique'
-                GROUP BY c.id, c.nom, c.duree_vie_normale
+                WHERE c.type_gestion = 'unique'";
+        $params = [];
+        if ($categoryId !== null && $categoryId > 0) {
+            $sql .= ' AND c.id = :category_id';
+            $params['category_id'] = $categoryId;
+        }
+        $sql .= " GROUP BY c.id, c.nom, c.duree_vie_normale
                 ORDER BY c.nom ASC";
 
-        $rows = $this->db->query($sql)->fetchAll();
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
         foreach ($rows as &$row) {
             foreach (['total', 'disponible', 'attribue', 'maintenance', 'declasse'] as $field) {
                 $row[$field] = (int) $row[$field];
