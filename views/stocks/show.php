@@ -56,7 +56,7 @@
                 <?= csrf_field() ?>
                 <div class="col-md-4">
                     <label class="form-label">Utilisateur</label>
-                    <select name="utilisateur_id" class="form-select" required>
+                    <select name="utilisateur_id" class="form-select" data-searchable data-placeholder="Nom, PF ou direction" required>
                         <option value="">Selectionner</option>
                         <?php foreach ($utilisateurs as $user): ?>
                             <option value="<?= (int) $user['id'] ?>"><?= e($user['nom']) ?> (<?= e($user['matricule']) ?>)</option>
@@ -91,7 +91,7 @@
                 <?= csrf_field() ?>
                 <div class="col-md-4">
                     <label class="form-label">Utilisateur</label>
-                    <select name="utilisateur_id" class="form-select" required>
+                    <select name="utilisateur_id" class="form-select" data-searchable data-placeholder="Nom, PF ou direction" required>
                         <option value="">Selectionner</option>
                         <?php foreach ($utilisateurs as $user): ?>
                             <option value="<?= (int) $user['id'] ?>"><?= e($user['nom']) ?> (<?= e($user['matricule']) ?>)</option>

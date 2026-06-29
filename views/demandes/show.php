@@ -3,6 +3,7 @@ $status = (string) $demande['statut'];
 $statusLabel = match ($status) {
     'soumis', 'validation_responsable' => 'Validation responsable',
     'validation_it' => 'Validation IT',
+    'correction_requise' => 'Correction demandee',
     'approuve' => 'Approuvee',
     'rejete' => 'Rejetee',
     'attribue' => 'Materiel attribue',
@@ -34,6 +35,7 @@ $organization = array_filter([
         <p>Soumise le <?= e(format_date((string) $demande['date_demande'])) ?> par <?= e((string) $demande['demandeur_nom']) ?></p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+        <?php if ($isOwner && $status === 'correction_requise'): ?><a class="btn btn-warning" href="<?= e(base_url('demandes/' . (int) $demande['id'] . '/edit')) ?>"><i class="bi bi-pencil-square"></i> Modifier et resoumettre</a><?php endif; ?>
         <a class="btn btn-outline-secondary" target="_blank" href="<?= e(base_url('demandes/' . (int) $demande['id'] . '/print')) ?>"><i class="bi bi-printer"></i> Imprimer</a>
         <a class="btn btn-outline-secondary" target="_blank" href="<?= e(base_url('demandes/' . (int) $demande['id'] . '/pdf')) ?>"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
     </div>
@@ -129,7 +131,7 @@ $organization = array_filter([
                     <?php if ($fulfillment['needsIndividual'] && !$fulfillment['individualComplete']): ?>
                         <div class="fulfillment-form-row">
                             <div><small>Equipement individuel</small><strong><?= e((string) $demande['equipement_categorie']) ?></strong></div>
-                            <select name="equipement_id" class="form-select">
+                            <select name="equipement_id" class="form-select" data-searchable data-placeholder="Serie, inventaire, marque ou modele">
                                 <option value="">Ne pas attribuer maintenant</option>
                                 <?php foreach ($fulfillment['availableEquipments'] as $equipment): ?>
                                     <option value="<?= (int) $equipment['id'] ?>"><?= e(implode(' - ', array_filter([$equipment['serial_number'] ?? '', $equipment['code_inventaire'] ?? '', $equipment['marque'] ?? '', $equipment['modele'] ?? '']))) ?></option>
@@ -143,7 +145,7 @@ $organization = array_filter([
                         <?php if ((int) $accessory['remaining'] <= 0) continue; ?>
                         <div class="fulfillment-form-row">
                             <div><small>Accessoire restant</small><strong><?= e((string) $accessory['label']) ?> x<?= (int) $accessory['remaining'] ?></strong></div>
-                            <select name="stock_id[<?= (int) $accessory['categorie_id'] ?>]" class="form-select">
+                            <select name="stock_id[<?= (int) $accessory['categorie_id'] ?>]" class="form-select" data-searchable data-placeholder="Designation ou emplacement">
                                 <option value="">Ne pas attribuer maintenant</option>
                                 <?php foreach ($accessory['stocks'] as $stock): ?>
                                     <option value="<?= (int) $stock['id'] ?>"><?= e((string) $stock['designation']) ?> - <?= (int) $stock['quantite_disponible'] ?> disponible(s)<?= !empty($stock['emplacement']) ? ' - ' . e((string) $stock['emplacement']) : '' ?></option>
@@ -169,6 +171,7 @@ $organization = array_filter([
                     <textarea class="form-control" id="commentaire" name="commentaire" rows="3" placeholder="Ajoutez un contexte utile au demandeur et a l'IT"></textarea>
                     <div class="d-flex gap-2 mt-3">
                         <button class="btn btn-success" name="statut" value="validee"><i class="bi bi-check-lg"></i> Approuver</button>
+                        <button class="btn btn-warning" name="statut" value="retour_correction"><i class="bi bi-reply"></i> Renvoyer pour correction</button>
                         <button class="btn btn-outline-danger" name="statut" value="refusee"><i class="bi bi-x-lg"></i> Refuser</button>
                     </div>
                 </form>
@@ -184,6 +187,13 @@ $organization = array_filter([
                     <span><i class="bi bi-check-lg"></i></span>
                     <div><small>Soumission</small><strong>Demande enregistree</strong><time><?= e(format_date((string) $demande['date_demande'])) ?></time></div>
                 </div>
+                <?php foreach ($demande['validation_history'] as $event): ?>
+                    <?php if (!in_array((string) $event['decision'], ['retour_correction', 'resoumis'], true)) continue; ?>
+                    <div class="<?= (string) $event['decision'] === 'retour_correction' ? 'active' : 'complete' ?>">
+                        <span><i class="bi bi-<?= (string) $event['decision'] === 'retour_correction' ? 'reply' : 'arrow-repeat' ?>"></i></span>
+                        <div><small><?= (string) $event['niveau'] === 'manager_it' ? 'Equipe IT' : 'Responsable' ?></small><strong><?= (string) $event['decision'] === 'retour_correction' ? 'Retour pour correction' : 'Demande resoumise' ?></strong><time><?= e(format_date((string) $event['created_at'])) ?></time><?php if (!empty($event['commentaire'])): ?><p><?= e((string) $event['commentaire']) ?></p><?php endif; ?></div>
+                    </div>
+                <?php endforeach; ?>
                 <div class="<?= $responsibleDecision ? ((string) $responsibleDecision['decision'] === 'rejete' ? 'rejected' : 'complete') : (in_array($status, ['soumis', 'validation_responsable'], true) ? 'active' : '') ?>">
                     <span><?= $responsibleDecision ? '<i class="bi bi-' . ((string) $responsibleDecision['decision'] === 'rejete' ? 'x' : 'check') . '-lg"></i>' : '2' ?></span>
                     <div><small>Responsable</small><strong><?= e((string) ($responsibleDecision['validateur_nom'] ?? $demande['nom_chef'])) ?></strong><time><?= $responsibleDecision ? e(format_date((string) $responsibleDecision['created_at'])) : 'En attente de decision' ?></time><?php if (!empty($responsibleDecision['commentaire'])): ?><p><?= e((string) $responsibleDecision['commentaire']) ?></p><?php endif; ?></div>

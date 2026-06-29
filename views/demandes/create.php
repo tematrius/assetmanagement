@@ -24,16 +24,19 @@ if (!is_array($oldAccessories)) {
     $oldAccessories = [];
 }
 ?>
+<?php $isEditing = isset($editingDemande); ?>
 
 <div class="page-heading">
     <div>
-        <h2>Nouvelle demande</h2>
-        <p>Demandez un equipement, des accessoires, ou les deux dans le meme dossier.</p>
+        <h2><?= $isEditing ? 'Corriger la demande #' . (int) $editingDemande['id'] : 'Nouvelle demande' ?></h2>
+        <p><?= $isEditing ? 'Apportez les corrections demandees puis renvoyez le dossier dans le circuit de validation.' : 'Demandez un equipement, des accessoires, ou les deux dans le meme dossier.' ?></p>
     </div>
 </div>
 
-<form method="POST" action="<?= e(base_url('demandes')) ?>" class="request-form">
+<?php if ($isEditing): ?><div class="alert alert-warning"><strong>Corrections demandees :</strong> <?= nl2br(e((string) $editingDemande['commentaire_validation'])) ?></div><?php endif; ?>
+<form method="POST" action="<?= e(base_url($isEditing ? 'demandes/' . (int) $editingDemande['id'] : 'demandes')) ?>" class="request-form">
     <?= csrf_field() ?>
+    <?php if ($isEditing): ?><input type="hidden" name="_method" value="PUT"><?php endif; ?>
     <script>
         window.ITAM_REQUEST_DATA = <?= json_encode([
             'users' => $utilisateurs,

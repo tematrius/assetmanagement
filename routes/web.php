@@ -87,6 +87,8 @@ $router->get('/demandes', [DemandeController::class, 'index']);
 $router->get('/demandes/archives', [DemandeController::class, 'archives']);
 $router->get('/demandes/create', [DemandeController::class, 'create']);
 $router->post('/demandes', [DemandeController::class, 'store']);
+$router->get('/demandes/{id}/edit', [DemandeController::class, 'edit']);
+$router->put('/demandes/{id}', [DemandeController::class, 'update']);
 $router->post('/demandes/{id}/fulfill', [DemandeController::class, 'fulfill']);
 $router->get('/demandes/{id}', [DemandeController::class, 'show']);
 $router->post('/demandes/{id}/validate', [DemandeController::class, 'validateDemand']);

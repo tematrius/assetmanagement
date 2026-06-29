@@ -282,8 +282,9 @@ CREATE TABLE demandes (
     type_demande ENUM('nouvel_equipement', 'remplacement', 'maintenance', 'accessoire') NOT NULL,
     justification TEXT NOT NULL,
     urgence ENUM('faible', 'normale', 'haute') NOT NULL DEFAULT 'normale',
-    statut ENUM('brouillon', 'soumis', 'validation_responsable', 'validation_it', 'approuve', 'rejete', 'attribue', 'cloture') NOT NULL DEFAULT 'soumis',
+    statut ENUM('brouillon', 'soumis', 'validation_responsable', 'validation_it', 'correction_requise', 'approuve', 'rejete', 'attribue', 'cloture') NOT NULL DEFAULT 'soumis',
     commentaire_validation TEXT NULL,
+    correction_niveau ENUM('responsable', 'manager_it') NULL,
     date_validation_responsable TIMESTAMP NULL,
     date_validation_it TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -305,12 +306,12 @@ CREATE TABLE validations_demandes (
     demande_id INT UNSIGNED NOT NULL,
     validateur_id INT UNSIGNED NOT NULL,
     niveau ENUM('responsable', 'manager_it') NOT NULL,
-    decision ENUM('approuve', 'rejete') NOT NULL,
+    decision ENUM('approuve', 'rejete', 'retour_correction', 'resoumis') NOT NULL,
     commentaire TEXT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_validations_demandes_demande FOREIGN KEY (demande_id) REFERENCES demandes(id) ON DELETE CASCADE,
     CONSTRAINT fk_validations_demandes_validateur FOREIGN KEY (validateur_id) REFERENCES utilisateurs(id) ON DELETE CASCADE,
-    UNIQUE KEY uq_validation_demande_niveau (demande_id, niveau),
+    INDEX idx_validations_demandes_demande (demande_id),
     INDEX idx_validations_demandes_validateur (validateur_id)
 ) ENGINE=InnoDB;
 

@@ -314,7 +314,7 @@ class DemandeController extends Controller
         }
 
         $status = (string) ($_POST['statut'] ?? '');
-        if (!in_array($status, ['validee', 'refusee', 'approuve', 'rejete'], true)) {
+        if (!in_array($status, ['validee', 'refusee', 'approuve', 'rejete', 'retour_correction'], true)) {
             flash('error', 'Statut invalide.');
             redirect(Auth::isItStaff() ? 'demandes' : 'validations');
         }
@@ -333,6 +333,123 @@ class DemandeController extends Controller
             flash('error', 'Validation impossible: ' . $e->getMessage());
         }
         redirect(Auth::isItStaff() ? 'demandes' : 'validations');
+    }
+
+    public function edit(string $id): void
+    {
+        Auth::requireAuth();
+        $demande = $this->demandes->find((int) $id);
+        if (!$demande || (int) $demande['demandeur_id'] !== Auth::id() || (string) $demande['statut'] !== 'correction_requise') {
+            http_response_code(403);
+            require __DIR__ . '/../views/errors/403.php';
+            return;
+        }
+        if (empty($_SESSION['_old'])) {
+            $attributeValues = [];
+            foreach ($demande['request_attributes'] as $attribute) {
+                $attributeValues[(int) ($attribute['attribute_id'] ?? 0)] = (string) ($attribute['valeur'] ?? '');
+            }
+            remember_old_input([
+                'utilisateur_id' => (string) $demande['demandeur_id'],
+                'utilisateur_search' => (string) $demande['demandeur_nom'] . ' (' . (string) $demande['matricule'] . ')',
+                'demandeur_statut' => (string) ($demande['demandeur_statut'] ?? 'personnel'),
+                'validateur_id' => (string) $demande['validateur_id'],
+                'nature_demande' => (string) $demande['nature_demande'],
+                'categorie_id' => (string) ($demande['categorie_id'] ?? ''),
+                'accessoires_json' => (string) $demande['accessoires_json'],
+                'urgence' => (string) $demande['urgence'],
+                'description' => (string) $demande['description'],
+                'request_attributes' => $attributeValues,
+            ]);
+        }
+        $user = $this->utilisateurs->find(Auth::id());
+        $categories = array_values(array_filter($this->categories->all(), static fn (array $category): bool =>
+            (string) ($category['mode_gestion'] ?? '') === 'unique' && !empty($category['visible_dans_demandes'])
+        ));
+        foreach ($categories as &$category) $category['attributes'] = $this->categories->attributesByCategory((int) $category['id']);
+        unset($category);
+        $accessoryCatalog = array_map(static fn (array $item): array => [
+            'categorie_id' => (int) $item['categorie_id'], 'categorie_nom' => (string) $item['categorie_nom'], 'label' => (string) $item['label'],
+        ], $this->stocks->requestableCategories(false));
+        $this->view('demandes/create', [
+            'title' => 'Corriger la demande #' . (int) $id,
+            'utilisateurs' => $user ? [$user] : [],
+            'categories' => $categories,
+            'validatorsByUser' => [(string) Auth::id() => $this->utilisateurs->validatorsFor(Auth::id())],
+            'accessoryCatalog' => $accessoryCatalog,
+            'editingDemande' => $demande,
+        ]);
+    }
+
+    public function update(string $id): void
+    {
+        Auth::requireAuth();
+        $this->validateCsrf();
+        $demande = $this->demandes->find((int) $id);
+        if (!$demande || (int) $demande['demandeur_id'] !== Auth::id() || (string) $demande['statut'] !== 'correction_requise') {
+            flash('error', 'Cette demande ne peut pas etre modifiee.');
+            redirect('mes-demandes');
+        }
+        $nature = trim((string) ($_POST['nature_demande'] ?? ''));
+        $categoryId = (int) ($_POST['categorie_id'] ?? 0);
+        $description = trim((string) ($_POST['description'] ?? ''));
+        $accessories = json_decode((string) ($_POST['accessoires_json'] ?? '[]'), true);
+        if (!is_array($accessories)) $accessories = [];
+        if (!in_array($nature, ['nouveau_materiel', 'changement', 'accessoire'], true) || $description === ''
+            || ($nature !== 'accessoire' && $categoryId <= 0) || ($nature === 'accessoire' && $accessories === [])) {
+            flash('error', 'Complete le besoin, la categorie ou les accessoires demandes.');
+            remember_old_input($_POST);
+            redirect('demandes/' . (int) $id . '/edit');
+        }
+        $category = $categoryId > 0 ? $this->categories->find($categoryId) : null;
+        if ($category && ((string) $category['mode_gestion'] !== 'unique' || empty($category['visible_dans_demandes']))) {
+            flash('error', 'Categorie non disponible pour une demande utilisateur.');
+            remember_old_input($_POST);
+            redirect('demandes/' . (int) $id . '/edit');
+        }
+        $normalizedAttributes = [];
+        $requested = is_array($_POST['request_attributes'] ?? null) ? $_POST['request_attributes'] : [];
+        foreach (($category['attributes'] ?? []) as $attribute) {
+            if (empty($attribute['visible_dans_demandes'])) continue;
+            $value = trim((string) ($requested[(int) $attribute['id']] ?? ''));
+            if (!empty($attribute['required']) && $value === '') {
+                flash('error', 'Complete le champ ' . (string) $attribute['nom'] . '.');
+                remember_old_input($_POST);
+                redirect('demandes/' . (int) $id . '/edit');
+            }
+            if ($value !== '') $normalizedAttributes[] = ['attribute_id' => (int) $attribute['id'], 'nom' => (string) $attribute['nom'], 'type' => (string) $attribute['type'], 'valeur' => $value];
+        }
+        $accessoryCatalog = [];
+        foreach ($this->stocks->requestableCategories(false) as $item) $accessoryCatalog[(int) $item['categorie_id']] = $item;
+        $normalizedAccessories = [];
+        foreach ($accessories as $accessory) {
+            $accessoryCategoryId = (int) ($accessory['categorie_id'] ?? 0);
+            $quantity = max(1, (int) ($accessory['quantite'] ?? 1));
+            if (!isset($accessoryCatalog[$accessoryCategoryId]) || $quantity > (int) $accessoryCatalog[$accessoryCategoryId]['quantite_disponible']) {
+                flash('error', 'Un accessoire corrige n est pas disponible dans la quantite demandee.');
+                remember_old_input($_POST);
+                redirect('demandes/' . (int) $id . '/edit');
+            }
+            $normalizedAccessories[] = ['categorie_id' => $accessoryCategoryId, 'label' => (string) $accessoryCatalog[$accessoryCategoryId]['categorie_nom'], 'quantite' => $quantity];
+        }
+        try {
+            $this->demandes->updateReturned((int) $id, Auth::id(), [
+                'categorie_id' => $categoryId ?: null,
+                'type_demande' => match ($nature) { 'nouveau_materiel' => 'nouvel_equipement', 'changement' => 'remplacement', default => 'accessoire' },
+                'nature_demande' => $nature, 'justification' => $description,
+                'demandeur_statut' => $_POST['demandeur_statut'] ?? $demande['demandeur_statut'],
+                'request_attributes' => $normalizedAttributes, 'accessoires' => $normalizedAccessories,
+                'urgence' => $_POST['urgence'] ?? 'normale',
+            ]);
+            (new Notification())->create((int) $demande['validateur_id'], 'Demande corrigee', 'La demande #' . (int) $id . ' a ete corrigee et resoumise.', 'demande', 'demandes/' . (int) $id);
+            clear_old_input();
+            flash('success', 'Demande corrigee et renvoyee dans le circuit de validation.');
+            redirect('demandes/' . (int) $id);
+        } catch (Throwable $e) {
+            flash('error', 'Modification impossible: ' . $e->getMessage());
+            remember_old_input($_POST);
+            redirect('demandes/' . (int) $id . '/edit');
+        }
     }
 
     public function show(string $id): void
@@ -528,6 +645,17 @@ class DemandeController extends Controller
             $rejected = in_array($submittedStatus, ['refusee', 'rejete'], true);
             $actorName = (string) (Auth::user()['nom_complet'] ?? Auth::user()['username'] ?? 'Validateur');
             $link = 'demandes/' . $requestId;
+
+            if ($submittedStatus === 'retour_correction') {
+                $notifications->create(
+                    $requesterId,
+                    'Demande a corriger',
+                    $actorName . ' demande une correction sur votre demande #' . $requestId . '.',
+                    'alerte',
+                    $link
+                );
+                return;
+            }
 
             if ($rejected) {
                 $notifications->create(

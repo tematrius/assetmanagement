@@ -26,7 +26,7 @@ class Demande extends Model
 
     public function statusSummary(): array
     {
-        $summary = ['total' => 0, 'soumis' => 0, 'validation_it' => 0, 'approuve' => 0, 'rejete' => 0];
+        $summary = ['total' => 0, 'soumis' => 0, 'validation_it' => 0, 'correction_requise' => 0, 'approuve' => 0, 'rejete' => 0];
         foreach ($this->db->query('SELECT statut, COUNT(*) total FROM demandes GROUP BY statut')->fetchAll() as $row) {
             $count = (int) $row['total'];
             $summary['total'] += $count;
@@ -94,6 +94,58 @@ class Demande extends Model
         return (int) $this->db->lastInsertId();
     }
 
+    public function updateReturned(int $id, int $requesterId, array $data): void
+    {
+        $request = $this->find($id);
+        if (!$request || (int) $request['demandeur_id'] !== $requesterId || (string) $request['statut'] !== 'correction_requise') {
+            throw new RuntimeException('Cette demande ne peut pas etre modifiee.');
+        }
+
+        $payload = [
+            'justification' => trim((string) ($data['justification'] ?? '')),
+            'demandeur_statut' => $data['demandeur_statut'] ?? null,
+            'nature_demande' => $data['nature_demande'] ?? null,
+            'equipement_type_ordinateur' => $data['equipement_type_ordinateur'] ?? null,
+            'request_attributes' => is_array($data['request_attributes'] ?? null) ? array_values($data['request_attributes']) : [],
+            'accessoires' => is_array($data['accessoires'] ?? null) ? array_values($data['accessoires']) : [],
+            'souris_type' => $data['souris_type'] ?? null,
+        ];
+        if ($payload['justification'] === '') {
+            throw new InvalidArgumentException('La justification est obligatoire.');
+        }
+
+        $nextStatus = (string) ($request['correction_niveau'] ?? '') === 'manager_it' ? 'validation_it' : 'soumis';
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE demandes SET categorie_id = :categorie_id, type_demande = :type_demande,
+                 justification = :justification, urgence = :urgence, statut = :statut,
+                 commentaire_validation = NULL, correction_niveau = NULL WHERE id = :id'
+            );
+            $stmt->execute([
+                'id' => $id,
+                'categorie_id' => (int) ($data['categorie_id'] ?? 0) ?: null,
+                'type_demande' => $this->normalizeType((string) ($data['type_demande'] ?? $data['nature_demande'] ?? '')),
+                'justification' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'urgence' => $this->normalizeUrgency((string) ($data['urgence'] ?? 'normale')),
+                'statut' => $nextStatus,
+            ]);
+            $this->db->prepare(
+                "INSERT INTO validations_demandes (demande_id, validateur_id, niveau, decision, commentaire)
+                 VALUES (:demande_id, :validateur_id, :niveau, 'resoumis', :commentaire)"
+            )->execute([
+                'demande_id' => $id,
+                'validateur_id' => $requesterId,
+                'niveau' => (string) ($request['correction_niveau'] ?? '') === 'manager_it' ? 'manager_it' : 'responsable',
+                'commentaire' => 'Demande corrigee et resoumise par le demandeur.',
+            ]);
+            $this->db->commit();
+        } catch (Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
+    }
+
     public function validate(int $id, int $validatorId, string $status, ?string $comment = null): bool
     {
         $this->db->beginTransaction();
@@ -105,7 +157,11 @@ class Demande extends Model
                 throw new RuntimeException('Demande introuvable.');
             }
 
-            $decision = in_array($status, ['refusee', 'rejete'], true) ? 'rejete' : 'approuve';
+            $decision = match (true) {
+                in_array($status, ['refusee', 'rejete'], true) => 'rejete',
+                $status === 'retour_correction' => 'retour_correction',
+                default => 'approuve',
+            };
             $currentStatus = (string) $request['statut'];
             $level = in_array($currentStatus, ['soumis', 'validation_responsable'], true)
                 ? 'responsable'
@@ -135,11 +191,13 @@ class Demande extends Model
                 }
             }
 
+            if ($decision === 'retour_correction' && trim((string) $comment) === '') {
+                throw new InvalidArgumentException('Indique les corrections attendues avant de renvoyer la demande.');
+            }
+
             $insert = $this->db->prepare(
                 'INSERT INTO validations_demandes (demande_id, validateur_id, niveau, decision, commentaire)
-                 VALUES (:demande_id, :validateur_id, :niveau, :decision, :commentaire)
-                 ON DUPLICATE KEY UPDATE validateur_id = VALUES(validateur_id), decision = VALUES(decision),
-                                         commentaire = VALUES(commentaire), created_at = CURRENT_TIMESTAMP'
+                 VALUES (:demande_id, :validateur_id, :niveau, :decision, :commentaire)'
             );
             $insert->execute([
                 'demande_id' => $id,
@@ -149,7 +207,9 @@ class Demande extends Model
                 'commentaire' => $this->nullable($comment),
             ]);
 
-            if ($decision === 'rejete') {
+            if ($decision === 'retour_correction') {
+                $nextStatus = 'correction_requise';
+            } elseif ($decision === 'rejete') {
                 $nextStatus = 'rejete';
             } elseif ($level === 'responsable') {
                 $nextStatus = 'validation_it';
@@ -157,7 +217,7 @@ class Demande extends Model
                 $nextStatus = 'approuve';
             }
 
-            $sql = 'UPDATE demandes SET statut = :statut, commentaire_validation = :commentaire';
+            $sql = 'UPDATE demandes SET statut = :statut, commentaire_validation = :commentaire, correction_niveau = :correction_niveau';
             if ($level === 'responsable') {
                 $sql .= ', date_validation_responsable = NOW()';
             } else {
@@ -169,6 +229,7 @@ class Demande extends Model
                 'id' => $id,
                 'statut' => $nextStatus,
                 'commentaire' => $this->nullable($comment),
+                'correction_niveau' => $decision === 'retour_correction' ? $level : null,
             ]);
 
             $this->db->commit();

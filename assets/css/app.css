@@ -5266,3 +5266,14 @@ a.metric-card:hover {
 .movement-route-preview span:last-child {
     text-align: right;
 }
+
+.searchable-select { position: relative; }
+.searchable-select-source { display: none !important; }
+.searchable-select-results { left: 0; right: 0; z-index: 1080; }
+
+.status-correction_requise,
+.request-admin-status.status-correction_requise {
+    color: #7a4b00;
+    background: #fff4d6;
+    border-color: #efbf59;
+}

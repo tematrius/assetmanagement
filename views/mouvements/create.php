@@ -36,12 +36,10 @@
             <div class="row g-2 align-items-end">
                 <div class="col-md-4">
                     <label class="form-label">Categorie</label>
-                    <select id="mv_category" class="form-select">
-                        <option value="">Toutes les categories individuelles</option>
-                        <?php foreach ($categories as $category): ?>
-                            <option value="<?= e((string) $category['nom']) ?>"><?= e((string) $category['nom']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <input id="mv_category" class="form-control" list="mv_category_options" autocomplete="off" placeholder="Tapez une categorie">
+                    <datalist id="mv_category_options">
+                        <?php foreach ($categories as $category): ?><option value="<?= e((string) $category['nom']) ?>"><?php endforeach; ?>
+                    </datalist>
                 </div>
                 <div class="col-md-3" id="mv_computer_type_wrap" style="display:none;">
                     <label class="form-label">Type d'ordinateur</label>

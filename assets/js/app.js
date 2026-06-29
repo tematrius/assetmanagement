@@ -45,6 +45,49 @@ document.addEventListener('DOMContentLoaded', () => {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 
+    document.querySelectorAll('select[data-searchable]').forEach((select) => {
+        const options = Array.from(select.options).filter((option) => option.value !== '');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'searchable-select';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = select.className;
+        input.autocomplete = 'off';
+        input.placeholder = select.dataset.placeholder || select.options[0]?.textContent || 'Rechercher';
+        input.value = select.selectedOptions[0]?.value ? select.selectedOptions[0].textContent.trim() : '';
+        input.required = select.required;
+        const results = document.createElement('div');
+        results.className = 'smart-results searchable-select-results';
+        select.required = false;
+        select.classList.add('searchable-select-source');
+        select.parentNode.insertBefore(wrapper, select);
+        wrapper.append(input, results, select);
+
+        const render = () => {
+            const query = normalize(input.value.trim());
+            const matches = options.filter((option) => normalize(option.textContent).includes(query)).slice(0, 12);
+            results.innerHTML = matches.map((option) => `<button type="button" data-value="${escapeHtml(option.value)}">${escapeHtml(option.textContent.trim())}</button>`).join('');
+            results.style.display = matches.length ? 'block' : 'none';
+        };
+        input.addEventListener('input', () => { select.value = ''; input.setCustomValidity(''); render(); });
+        input.addEventListener('focus', render);
+        results.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-value]');
+            if (!button) return;
+            select.value = button.dataset.value;
+            input.value = select.selectedOptions[0]?.textContent.trim() || '';
+            results.style.display = 'none';
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+        select.form?.addEventListener('submit', (event) => {
+            if (input.required && !select.value) {
+                event.preventDefault();
+                input.setCustomValidity('Selectionnez une proposition valide.');
+                input.reportValidity();
+            } else input.setCustomValidity('');
+        });
+    });
+
     let currentCategoryMode = '';
     let currentCategoryName = '';
 
@@ -1008,7 +1051,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         mvType.addEventListener('change', setMovementTypeRules);
 
-        mvCategory.addEventListener('change', () => {
+        let movementCategoryTimer = null;
+        const refreshMovementCategory = () => {
             if (mvComputerTypeWrap) {
                 mvComputerTypeWrap.style.display = isComputerCategory(mvCategory.value) ? '' : 'none';
             }
@@ -1020,7 +1064,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 mvEquipmentResults.innerHTML = '<div class="assignment-result-item text-danger">Erreur de recherche</div>';
                 mvEquipmentResults.style.display = 'block';
             });
+        };
+        mvCategory.addEventListener('input', () => {
+            window.clearTimeout(movementCategoryTimer);
+            movementCategoryTimer = window.setTimeout(refreshMovementCategory, 250);
         });
+        mvCategory.addEventListener('change', refreshMovementCategory);
 
         if (mvComputerType) {
             mvComputerType.addEventListener('change', () => {

@@ -2,6 +2,7 @@
 $statusLabel = static fn (string $status): string => match ($status) {
     'soumis' => 'Validation responsable',
     'validation_it' => 'Validation IT',
+    'correction_requise' => 'Correction demandee',
     'approuve' => 'Approuvee',
     'rejete' => 'Rejetee',
     'attribue' => 'Equipement attribue',
@@ -18,13 +19,14 @@ $statusLabel = static fn (string $status): string => match ($status) {
     <div><span>Total</span><strong><?= (int) $summary['total'] ?></strong></div>
     <div><span>Chez le responsable</span><strong><?= (int) $summary['soumis'] ?></strong></div>
     <div><span>Validation IT</span><strong><?= (int) $summary['validation_it'] ?></strong></div>
+    <div><span>A corriger</span><strong><?= (int) $summary['correction_requise'] ?></strong></div>
     <div><span>Approuvees</span><strong><?= (int) $summary['approuve'] ?></strong></div>
     <div><span>Rejetees</span><strong><?= (int) $summary['rejete'] ?></strong></div>
 </div>
 
 <form method="GET" action="<?= e(base_url('demandes')) ?>" class="management-filter-bar management-filter-wide">
     <div class="management-search"><i class="bi bi-search"></i><input name="q" value="<?= e($filters['q'] ?? '') ?>" placeholder="Nom, PF, validateur ou justification"></div>
-    <select name="statut" class="form-select"><option value="">Tous les statuts</option><?php foreach (['soumis', 'validation_it', 'approuve', 'rejete', 'attribue', 'cloture'] as $status): ?><option value="<?= e($status) ?>" <?= ($filters['statut'] ?? '') === $status ? 'selected' : '' ?>><?= e($statusLabel($status)) ?></option><?php endforeach; ?></select>
+    <select name="statut" class="form-select"><option value="">Tous les statuts</option><?php foreach (['soumis', 'validation_it', 'correction_requise', 'approuve', 'rejete', 'attribue', 'cloture'] as $status): ?><option value="<?= e($status) ?>" <?= ($filters['statut'] ?? '') === $status ? 'selected' : '' ?>><?= e($statusLabel($status)) ?></option><?php endforeach; ?></select>
     <select name="equipement_categorie" class="form-select"><option value="">Toutes les categories</option><?php foreach ($categories as $category): ?><option value="<?= e((string) $category['nom']) ?>" <?= ($filters['equipement_categorie'] ?? '') === $category['nom'] ? 'selected' : '' ?>><?= e((string) $category['nom']) ?></option><?php endforeach; ?></select>
     <button class="btn btn-primary"><i class="bi bi-funnel"></i> Filtrer</button>
     <a class="btn btn-outline-secondary" href="<?= e(base_url('demandes')) ?>"><i class="bi bi-arrow-counterclockwise"></i></a>

@@ -2,6 +2,7 @@
 $statusLabel = static fn (string $status): string => match ($status) {
     'soumis', 'validation_responsable' => 'Chez le responsable',
     'validation_it' => 'Validation IT',
+    'correction_requise' => 'Correction demandee',
     'approuve' => 'Approuvee',
     'rejete' => 'Rejetee',
     'attribue' => 'Materiel attribue',
@@ -11,6 +12,7 @@ $statusLabel = static fn (string $status): string => match ($status) {
 $statusStep = static fn (string $status): int => match ($status) {
     'soumis', 'validation_responsable' => 2,
     'validation_it' => 3,
+    'correction_requise' => 2,
     'approuve' => 4,
     'attribue', 'cloture' => 4,
     'rejete' => 2,
@@ -81,6 +83,7 @@ $statusStep = static fn (string $status): int => match ($status) {
                     <div><small>Soumise le</small><strong><?= e(format_date((string) $request['date_demande'])) ?></strong></div>
                     <div><small>Validateur</small><strong><?= e((string) $request['validateur_nom']) ?></strong></div>
                     <a class="btn btn-sm btn-outline-primary" href="<?= e(base_url('demandes/' . (int) $request['id'])) ?>">Voir la fiche <i class="bi bi-arrow-right"></i></a>
+                    <?php if ((string) $request['statut'] === 'correction_requise'): ?><a class="btn btn-sm btn-warning" href="<?= e(base_url('demandes/' . (int) $request['id'] . '/edit')) ?>"><i class="bi bi-pencil-square"></i> Corriger</a><?php endif; ?>
                 </div>
             </article>
         <?php endforeach; ?>

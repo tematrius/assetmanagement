@@ -134,6 +134,7 @@ foreach ($requests as $candidate) {
                         <textarea id="commentaire-<?= (int) $request['id'] ?>" name="commentaire" class="form-control" rows="3" placeholder="Ajoutez un contexte utile"></textarea>
                         <div class="validation-decision-actions">
                             <button class="btn btn-success" name="statut" value="validee"><i class="bi bi-check-lg"></i> Approuver</button>
+                            <button class="btn btn-warning" name="statut" value="retour_correction"><i class="bi bi-reply"></i> A corriger</button>
                             <button class="btn btn-outline-danger" name="statut" value="refusee"><i class="bi bi-x-lg"></i> Rejeter</button>
                         </div>
                     </form>

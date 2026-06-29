@@ -208,7 +208,7 @@ window.ITAM_EQUIPMENT_CATEGORY_BASE = <?= json_encode(base_url('equipements/cate
                 <option value="mettre_en_maintenance">Mettre en maintenance</option>
                 <option value="declasser">Declasser</option>
             </select>
-            <select name="bulk_user_id" id="bulk-user-wrap" class="form-select form-select-sm">
+            <select name="bulk_user_id" id="bulk-user-wrap" class="form-select form-select-sm" data-searchable data-placeholder="Nom ou PF de l utilisateur">
                 <option value="">Choisir l'utilisateur</option>
                 <?php foreach ($utilisateurs as $user): ?>
                     <option value="<?= (int) $user['id'] ?>"><?= e((string) $user['nom']) ?> (<?= e((string) $user['matricule']) ?>)</option>
