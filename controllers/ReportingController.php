@@ -103,13 +103,20 @@ class ReportingController extends Controller
     {
         $months = (int) ($_GET['months'] ?? 12);
 
+        // Dates de filtre : format valide uniquement, et bornes remises dans l'ordre.
+        $dateFrom = parse_date_input(trim((string) ($_GET['date_from'] ?? ''))) ?? '';
+        $dateTo = parse_date_input(trim((string) ($_GET['date_to'] ?? ''))) ?? '';
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+
         return [
             'site' => trim((string) ($_GET['site'] ?? '')),
             'direction' => trim((string) ($_GET['direction'] ?? '')),
             'departement' => trim((string) ($_GET['departement'] ?? '')),
             'type' => trim((string) ($_GET['type'] ?? '')),
-            'date_from' => trim((string) ($_GET['date_from'] ?? '')),
-            'date_to' => trim((string) ($_GET['date_to'] ?? '')),
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
             'months' => max(3, min(24, $months)),
         ];
     }

@@ -146,7 +146,7 @@ class Demande extends Model
         }
     }
 
-    public function validate(int $id, int $validatorId, string $status, ?string $comment = null): bool
+    public function validate(int $id, int $validatorId, string $status, ?string $comment = null, ?string $expectedStatus = null): bool
     {
         $this->db->beginTransaction();
         try {
@@ -163,9 +163,18 @@ class Demande extends Model
                 default => 'approuve',
             };
             $currentStatus = (string) $request['statut'];
-            $level = in_array($currentStatus, ['soumis', 'validation_responsable'], true)
-                ? 'responsable'
-                : 'manager_it';
+            if (in_array($currentStatus, ['soumis', 'validation_responsable'], true)) {
+                $level = 'responsable';
+            } elseif ($currentStatus === 'validation_it') {
+                $level = 'manager_it';
+            } else {
+                // Rejetee, en correction, approuvee, attribuee ou cloturee : plus rien a valider.
+                throw new RuntimeException('Cette demande n\'est plus en attente de validation (statut actuel : ' . str_replace('_', ' ', $currentStatus) . ').');
+            }
+            if ($expectedStatus !== null && $expectedStatus !== '' && $expectedStatus !== $currentStatus) {
+                // Double clic ou page restee ouverte : l'etape affichee a deja ete traitee.
+                throw new RuntimeException('Cette etape a deja ete traitee entre-temps. Actualisez la page.');
+            }
 
             if ($level === 'responsable' && (int) $request['validateur_id'] !== $validatorId) {
                 throw new RuntimeException('Seul le responsable choisi peut valider cette etape.');
@@ -271,7 +280,7 @@ class Demande extends Model
         $conditions = [];
         $params = [];
         if ($archives) {
-            $conditions[] = "d.statut IN ('approuve', 'rejete', 'attribue', 'cloture')";
+            $conditions[] = "d.statut IN ('rejete', 'cloture')";
         }
         $q = trim((string) ($filters['q'] ?? ''));
         if ($q !== '') {

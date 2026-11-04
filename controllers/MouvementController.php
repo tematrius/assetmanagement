@@ -291,9 +291,10 @@ class MouvementController extends Controller
 
         if ($type === 'retour') {
             $_POST['utilisateur_destination_id'] = '';
-            if ($destinationType === '') {
-                $destinationType = 'warehouse';
-                $destinationLabel = $destinationLabel !== '' ? $destinationLabel : 'Warehouse IT';
+            if ($destinationType === '' || $destinationType === 'utilisateur') {
+                // Un retour ramene le materiel au stock IT, sauf destination explicite.
+                $destinationType = 'depot';
+                $destinationLabel = 'Depot IT Central';
             }
         }
 

@@ -29,9 +29,9 @@ class Dashboard extends Model
     public function operations(): array
     {
         return [
-            'demandes_a_traiter' => (int) $this->db->query("SELECT COUNT(*) FROM demandes WHERE statut = 'validation_it'")->fetchColumn(),
+            'demandes_a_traiter' => (int) $this->db->query("SELECT COUNT(*) FROM demandes WHERE statut IN ('validation_it', 'approuve', 'attribue')")->fetchColumn(),
             'equipements_maintenance' => (int) $this->db->query("SELECT COUNT(*) FROM equipements WHERE statut = 'maintenance'")->fetchColumn(),
-            'stocks_faibles' => (int) $this->db->query("SELECT COUNT(*) FROM stocks_quantitatifs WHERE quantite_disponible <= 2")->fetchColumn(),
+            'stocks_faibles' => (int) $this->db->query("SELECT COUNT(*) FROM stocks_quantitatifs WHERE quantite_totale > 0 AND (quantite_disponible <= 3 OR quantite_disponible * 5 <= quantite_totale)")->fetchColumn(),
             'mouvements_du_jour' => (int) $this->db->query("SELECT COUNT(*) FROM historique_equipements WHERE DATE(created_at) = CURDATE()")->fetchColumn(),
         ];
     }

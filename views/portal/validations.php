@@ -128,7 +128,7 @@ foreach ($requests as $candidate) {
                         <span><i class="bi bi-check2-square"></i></span>
                         <div><strong>Votre decision</strong><small>Le dossier sera ensuite transmis a l'IT.</small></div>
                     </div>
-                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>">
+                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>"><input type="hidden" name="statut_attendu" value="<?= e((string) ($request['statut'] ?? '')) ?>">
                         <?= csrf_field() ?>
                         <label for="commentaire-<?= (int) $request['id'] ?>">Commentaire</label>
                         <textarea id="commentaire-<?= (int) $request['id'] ?>" name="commentaire" class="form-control" rows="3" placeholder="Ajoutez un contexte utile"></textarea>

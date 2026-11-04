@@ -51,8 +51,8 @@ $statusLabel = static fn (string $status): string => match ($status) {
                 <a class="btn btn-sm btn-outline-secondary" target="_blank" href="<?= e(base_url('demandes/' . (int) $request['id'] . '/print')) ?>"><i class="bi bi-printer"></i></a>
                 <a class="btn btn-sm btn-outline-secondary" target="_blank" href="<?= e(base_url('demandes/' . (int) $request['id'] . '/pdf')) ?>"><i class="bi bi-file-earmark-pdf"></i></a>
                 <?php if ($canApprove): ?>
-                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>"><?= csrf_field() ?><input type="hidden" name="statut" value="validee"><button class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Approuver</button></form>
-                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>"><?= csrf_field() ?><input type="hidden" name="statut" value="refusee"><button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Refuser</button></form>
+                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>"><input type="hidden" name="statut_attendu" value="<?= e((string) ($request['statut'] ?? '')) ?>"><?= csrf_field() ?><input type="hidden" name="statut" value="validee"><button class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Approuver</button></form>
+                    <form method="POST" action="<?= e(base_url('demandes/' . (int) $request['id'] . '/validate')) ?>"><input type="hidden" name="statut_attendu" value="<?= e((string) ($request['statut'] ?? '')) ?>"><?= csrf_field() ?><input type="hidden" name="statut" value="refusee"><button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Refuser</button></form>
                 <?php endif; ?>
             </div>
         </article>

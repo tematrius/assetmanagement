@@ -255,6 +255,21 @@ class Category extends Model
             throw new InvalidArgumentException('Nom de categorie obligatoire.');
         }
 
+        $current = $this->db->prepare('SELECT type_gestion FROM categories_equipements WHERE id = :id LIMIT 1');
+        $current->execute(['id' => $id]);
+        $currentMode = $current->fetchColumn();
+        if ($currentMode !== false && (string) $currentMode !== $mode) {
+            // Changer de mode rendrait invisibles les equipements ou stocks deja enregistres.
+            $usage = $this->db->prepare(
+                'SELECT (SELECT COUNT(*) FROM equipements WHERE categorie_id = :id_eq)
+                      + (SELECT COUNT(*) FROM stocks_quantitatifs WHERE categorie_id = :id_stock)'
+            );
+            $usage->execute(['id_eq' => $id, 'id_stock' => $id]);
+            if ((int) $usage->fetchColumn() > 0) {
+                throw new InvalidArgumentException('Le mode de gestion ne peut pas etre modifie : des equipements ou des stocks utilisent deja cette categorie.');
+            }
+        }
+
         $this->db->beginTransaction();
 
         try {
@@ -441,11 +456,23 @@ class Category extends Model
 
         usort($normalized, static fn (array $a, array $b): int => $a['minimum'] <=> $b['minimum']);
         $previousMaximum = null;
+        $previousOpenEnded = false;
         foreach ($normalized as $rule) {
+            if ($previousOpenEnded) {
+                // Une tranche sans age maximum couvre deja tout ce qui suit.
+                throw new InvalidArgumentException('Seule la derniere plage de vieillissement peut etre sans age maximum.');
+            }
             if ($previousMaximum !== null && $rule['minimum'] < $previousMaximum) {
                 throw new InvalidArgumentException('Les plages de vieillissement ne peuvent pas se chevaucher.');
             }
+            if ($previousMaximum === null && $rule['minimum'] > 0) {
+                throw new InvalidArgumentException('La premiere plage de vieillissement doit commencer a 0 an.');
+            }
+            if ($previousMaximum !== null && $rule['minimum'] > $previousMaximum + 0.001) {
+                throw new InvalidArgumentException('Les plages de vieillissement doivent se suivre sans trou (ex : 0-1, 1-3, 3-5).');
+            }
             $previousMaximum = $rule['maximum'];
+            $previousOpenEnded = $rule['maximum'] === null;
         }
 
         $delete = $this->db->prepare('DELETE FROM regles_vie_categories WHERE categorie_id = :categorie_id');

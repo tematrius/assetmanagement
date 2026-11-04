@@ -37,7 +37,7 @@ class DemandeFulfillment extends Model
         foreach ($requestedAccessories as &$accessory) {
             $accessory['remaining'] = max(0, $accessory['requested'] - $accessory['assigned']);
             $accessory['stocks'] = $accessory['remaining'] > 0
-                ? $this->availableStocksByCategory((int) $accessory['categorie_id'], (int) $accessory['remaining'])
+                ? $this->availableStocksByCategory((int) $accessory['categorie_id'], 1)
                 : [];
         }
         unset($accessory);
@@ -164,10 +164,13 @@ class DemandeFulfillment extends Model
         if (
             !$stock
             || (int) $stock['categorie_id'] !== $categoryId
-            || (int) $stock['quantite_disponible'] < $quantity
+            || (int) $stock['quantite_disponible'] <= 0
         ) {
-            throw new RuntimeException('Le stock selectionne est insuffisant ou ne correspond plus a l accessoire.');
+            throw new RuntimeException('Le stock selectionne est epuise ou ne correspond plus a l accessoire.');
         }
+        // Livraison partielle possible : on prend ce que le lot peut fournir,
+        // le reste pourra etre servi depuis un autre lot (la demande reste "attribue").
+        $quantity = min($quantity, (int) $stock['quantite_disponible']);
 
         $note = $comment !== '' ? $comment : 'Attribution depuis la demande #' . (int) $request['id'];
         $this->db->prepare(

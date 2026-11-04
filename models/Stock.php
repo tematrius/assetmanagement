@@ -234,6 +234,16 @@ class Stock extends Model
             throw new InvalidArgumentException('Ajoute au moins une quantite.');
         }
 
+        $mode = $this->db->prepare('SELECT type_gestion FROM categories_equipements WHERE id = :id LIMIT 1');
+        $mode->execute(['id' => $categoryId]);
+        $categoryMode = $mode->fetchColumn();
+        if ($categoryMode === false) {
+            throw new InvalidArgumentException('Categorie introuvable.');
+        }
+        if ((string) $categoryMode !== 'quantite') {
+            throw new InvalidArgumentException('Cette categorie est geree a l\'unite : creez plutot des equipements individuels.');
+        }
+
         $categoryName = $this->categoryName($categoryId);
         $reference = trim((string) ($data['designation'] ?? $data['reference'] ?? ''));
         $designation = $reference !== '' ? $reference : $categoryName;
@@ -375,6 +385,10 @@ class Stock extends Model
         }
 
         $column = $this->stockColumnForEtat($etat);
+        if ($column !== 'quantite_disponible') {
+            // Seules les unites utilisables (neuf / bon) peuvent etre remises a un utilisateur.
+            throw new InvalidArgumentException('Seules les unites en bon etat peuvent etre attribuees.');
+        }
 
         $this->db->beginTransaction();
 
@@ -408,15 +422,29 @@ class Stock extends Model
         $this->db->beginTransaction();
 
         try {
-            $assignment = $this->findAssignmentForUpdate($stockId, $userId);
-            if ($assignment === null || (int) $assignment['quantite'] < $quantite) {
-                throw new RuntimeException('Aucune attribution suffisante a retourner.');
+            $assignments = $this->findAssignmentsForUpdate($stockId, $userId);
+            $held = array_sum(array_map(static fn (array $row): int => (int) $row['quantite'], $assignments));
+            if ($held < $quantite) {
+                throw new RuntimeException('Aucune attribution suffisante a retourner (detenu : ' . $held . ').');
             }
 
-            $this->decreaseAssignment((int) $assignment['id'], $quantite);
+            // Le retour peut couvrir plusieurs attributions successives de l'utilisateur.
+            $remaining = $quantite;
+            foreach ($assignments as $assignment) {
+                if ($remaining <= 0) {
+                    break;
+                }
+                $part = min($remaining, (int) $assignment['quantite']);
+                $this->decreaseAssignment((int) $assignment['id'], $part);
+                $remaining -= $part;
+            }
+
+            // Les unites reviennent dans la colonne de l'etat constate au retour.
+            $targetColumn = $this->stockColumnForEtat($etat);
             $this->decrementColumn($stockId, 'quantite_attribuee', $quantite);
-            $this->incrementColumn($stockId, 'quantite_disponible', $quantite);
-            $this->insertHistory($stockId, 'retour_stock', $userId, null, $quantite, $commentaire ?: 'Retour stock');
+            $this->incrementColumn($stockId, $targetColumn, $quantite);
+            $stateLabel = $targetColumn === 'quantite_disponible' ? '' : ' (etat: ' . strtolower(trim($etat)) . ')';
+            $this->insertHistory($stockId, 'retour_stock', $userId, null, $quantite, ($commentaire ?: 'Retour stock') . $stateLabel);
 
             $this->db->commit();
         } catch (Throwable $e) {
@@ -561,6 +589,24 @@ class Stock extends Model
             'commentaire' => $commentaire,
             'attribue_par' => $this->actorId(),
         ]);
+    }
+
+    private function findAssignmentsForUpdate(int $stockId, int $userId): array
+    {
+        $stmt = $this->db->prepare("SELECT id, quantite
+                                    FROM attributions
+                                    WHERE stock_quantitatif_id = :stock_id
+                                      AND utilisateur_id = :utilisateur_id
+                                      AND statut = 'active'
+                                      AND quantite > 0
+                                    ORDER BY date_attribution ASC, id ASC
+                                    FOR UPDATE");
+        $stmt->execute([
+            'stock_id' => $stockId,
+            'utilisateur_id' => $userId,
+        ]);
+
+        return $stmt->fetchAll();
     }
 
     private function findAssignmentForUpdate(int $stockId, int $userId): ?array

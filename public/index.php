@@ -32,4 +32,27 @@ if ($baseUrl !== '' && str_starts_with($path, $baseUrl)) {
     $path = $path === '' ? '/' : $path;
 }
 
-$router->dispatch(method_override(), $path);
+$bufferLevel = ob_get_level();
+ob_start();
+try {
+    $router->dispatch(method_override(), $path);
+} catch (Throwable $e) {
+    // Retire le HTML partiellement genere avant l'erreur.
+    while (ob_get_level() > $bufferLevel) {
+        ob_end_clean();
+    }
+    // Filet de securite : annule une transaction restee ouverte et affiche une page propre.
+    try {
+        $pdo = Database::connection();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    } catch (Throwable $ignored) {
+    }
+    $errorReference = date('YmdHis') . '-' . substr(bin2hex(random_bytes(3)), 0, 6);
+    error_log('[ITAM ' . $errorReference . '] ' . $e::class . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) {
+        http_response_code(500);
+    }
+    require __DIR__ . '/../views/errors/500.php';
+}

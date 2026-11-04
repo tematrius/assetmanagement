@@ -241,7 +241,7 @@ class DemandeController extends Controller
             $catalog[(int) $item['categorie_id']] = $item;
         }
         $normalizedAccessories = [];
-        foreach ($accessoires as $accessory) {
+        foreach ($this->mergeAccessoryLines($accessoires) as $accessory) {
             $accessoryCategoryId = (int) ($accessory['categorie_id'] ?? 0);
             $quantity = max(1, (int) ($accessory['quantite'] ?? 1));
             if (!isset($catalog[$accessoryCategoryId]) || $quantity > (int) $catalog[$accessoryCategoryId]['quantite_disponible']) {
@@ -284,7 +284,13 @@ class DemandeController extends Controller
         $_POST['date_signature_chef'] = $dateSignatureChef !== '' ? $dateSignatureChef : null;
         $_POST['date_signature_manager'] = $dateSignatureManager !== '' ? $dateSignatureManager : null;
 
-        $demandeId = $this->demandes->create($_POST);
+        try {
+            $demandeId = $this->demandes->create($_POST);
+        } catch (Throwable $e) {
+            flash('error', 'Creation de la demande impossible : ' . $e->getMessage());
+            remember_old_input($_POST);
+            redirect('demandes/create');
+        }
         try {
             (new Notification())->create(
                 $validateurId,
@@ -325,7 +331,8 @@ class DemandeController extends Controller
                 (int) $id,
                 (int) Auth::user()['id'],
                 $status,
-                trim((string) ($_POST['commentaire'] ?? ''))
+                trim((string) ($_POST['commentaire'] ?? '')),
+                trim((string) ($_POST['statut_attendu'] ?? ''))
             );
             $this->notifyValidationResult($demande, $previousStatus, $status);
             flash('success', 'Etape de validation enregistree.');
@@ -402,6 +409,11 @@ class DemandeController extends Controller
             redirect('demandes/' . (int) $id . '/edit');
         }
         $category = $categoryId > 0 ? $this->categories->find($categoryId) : null;
+        if ($categoryId > 0 && !$category) {
+            flash('error', 'Categorie d\'equipement introuvable.');
+            remember_old_input($_POST);
+            redirect('demandes/' . (int) $id . '/edit');
+        }
         if ($category && ((string) $category['mode_gestion'] !== 'unique' || empty($category['visible_dans_demandes']))) {
             flash('error', 'Categorie non disponible pour une demande utilisateur.');
             remember_old_input($_POST);
@@ -417,12 +429,27 @@ class DemandeController extends Controller
                 remember_old_input($_POST);
                 redirect('demandes/' . (int) $id . '/edit');
             }
-            if ($value !== '') $normalizedAttributes[] = ['attribute_id' => (int) $attribute['id'], 'nom' => (string) $attribute['nom'], 'type' => (string) $attribute['type'], 'valeur' => $value];
+            if ($value === '') continue;
+            // Memes controles qu'a la creation de la demande.
+            if ((string) $attribute['type'] === 'liste') {
+                $allowed = array_map(static fn (array $option): string => (string) $option['label'], $attribute['options'] ?? []);
+                if (!in_array($value, $allowed, true)) {
+                    flash('error', 'Option invalide pour ' . (string) $attribute['nom'] . '.');
+                    remember_old_input($_POST);
+                    redirect('demandes/' . (int) $id . '/edit');
+                }
+            }
+            if ((string) $attribute['type'] === 'nombre' && !is_numeric($value)) {
+                flash('error', 'La valeur de ' . (string) $attribute['nom'] . ' doit etre numerique.');
+                remember_old_input($_POST);
+                redirect('demandes/' . (int) $id . '/edit');
+            }
+            $normalizedAttributes[] = ['attribute_id' => (int) $attribute['id'], 'nom' => (string) $attribute['nom'], 'type' => (string) $attribute['type'], 'valeur' => $value];
         }
         $accessoryCatalog = [];
         foreach ($this->stocks->requestableCategories(false) as $item) $accessoryCatalog[(int) $item['categorie_id']] = $item;
         $normalizedAccessories = [];
-        foreach ($accessories as $accessory) {
+        foreach ($this->mergeAccessoryLines($accessories) as $accessory) {
             $accessoryCategoryId = (int) ($accessory['categorie_id'] ?? 0);
             $quantity = max(1, (int) ($accessory['quantite'] ?? 1));
             if (!isset($accessoryCatalog[$accessoryCategoryId]) || $quantity > (int) $accessoryCatalog[$accessoryCategoryId]['quantite_disponible']) {
@@ -438,10 +465,30 @@ class DemandeController extends Controller
                 'type_demande' => match ($nature) { 'nouveau_materiel' => 'nouvel_equipement', 'changement' => 'remplacement', default => 'accessoire' },
                 'nature_demande' => $nature, 'justification' => $description,
                 'demandeur_statut' => $_POST['demandeur_statut'] ?? $demande['demandeur_statut'],
+                'equipement_type_ordinateur' => $_POST['equipement_type_ordinateur'] ?? ($demande['equipement_type_ordinateur'] ?? null),
+                'souris_type' => $_POST['souris_type'] ?? ($demande['souris_type'] ?? null),
                 'request_attributes' => $normalizedAttributes, 'accessoires' => $normalizedAccessories,
                 'urgence' => $_POST['urgence'] ?? 'normale',
             ]);
-            (new Notification())->create((int) $demande['validateur_id'], 'Demande corrigee', 'La demande #' . (int) $id . ' a ete corrigee et resoumise.', 'demande', 'demandes/' . (int) $id);
+            try {
+                $notifications = new Notification();
+                $message = 'La demande #' . (int) $id . ' a ete corrigee et resoumise.';
+                if ((string) ($demande['correction_niveau'] ?? '') === 'manager_it') {
+                    // La demande revient directement en validation IT : on previent l'equipe IT.
+                    $notifications->createForMany(
+                        array_values(array_filter($notifications->itValidatorIds(), static fn (int $userId): bool => $userId !== Auth::id())),
+                        'Demande corrigee - validation IT',
+                        $message,
+                        'demande',
+                        'demandes/' . (int) $id
+                    );
+                } else {
+                    $notifications->create((int) $demande['validateur_id'], 'Demande corrigee', $message, 'demande', 'demandes/' . (int) $id);
+                }
+            } catch (Throwable $notificationError) {
+                // La correction est enregistree : un echec de notification ne doit pas l'annuler a l'ecran.
+                error_log('Notification correction demande #' . (int) $id . ': ' . $notificationError->getMessage());
+            }
             clear_old_input();
             flash('success', 'Demande corrigee et renvoyee dans le circuit de validation.');
             redirect('demandes/' . (int) $id);
@@ -607,6 +654,32 @@ class DemandeController extends Controller
             'signedFileUrl' => base_url('../' . ltrim($signedPath, '/')),
             'signedFileIsPdf' => $isPdf,
         ]);
+    }
+
+    /**
+     * Regroupe les lignes d'accessoires d'une meme categorie (quantites additionnees),
+     * pour que la disponibilite et le traitement portent sur le total demande.
+     */
+    private function mergeAccessoryLines(mixed $lines): array
+    {
+        $merged = [];
+        foreach (is_array($lines) ? $lines : [] as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $categoryId = (int) ($line['categorie_id'] ?? 0);
+            if ($categoryId <= 0) {
+                continue;
+            }
+            $quantity = max(1, (int) ($line['quantite'] ?? 1));
+            if (isset($merged[$categoryId])) {
+                $merged[$categoryId]['quantite'] += $quantity;
+            } else {
+                $merged[$categoryId] = ['categorie_id' => $categoryId, 'quantite' => $quantity];
+            }
+        }
+
+        return array_values($merged);
     }
 
     private function filtersFromQuery(): array

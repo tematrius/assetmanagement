@@ -243,6 +243,23 @@ class Mouvement extends Model
         try {
             $equipment = $this->lockEquipment($equipementId);
             $currentHolder = $this->currentHolderId($equipementId);
+            $currentStatus = (string) ($equipment['statut'] ?? '');
+
+            if ($currentStatus === 'declasse' && $operation !== 'modification_etat') {
+                throw new RuntimeException('Equipement declasse : aucune attribution, maintenance ou retour n\'est possible.');
+            }
+            if ($operation === 'declassement' && $currentStatus === 'declasse') {
+                throw new RuntimeException('Equipement deja declasse.');
+            }
+            if ($operation === 'maintenance' && $currentStatus === 'maintenance') {
+                throw new RuntimeException('Equipement deja en maintenance.');
+            }
+            if ($operation === 'attribution' && $currentStatus === 'maintenance') {
+                throw new RuntimeException('Equipement en maintenance : faites d\'abord un retour au stock.');
+            }
+            if ($operation === 'retour_stock' && $currentHolder === null && $currentStatus === 'disponible') {
+                throw new RuntimeException('Equipement deja disponible au stock.');
+            }
 
             if ($sourceId === null) {
                 $sourceId = $currentHolder;
@@ -274,6 +291,9 @@ class Mouvement extends Model
                 },
                 'maintenance' => 'maintenance',
                 'declassement' => 'declasse',
+                'retour_stock' => $destinationType === 'warehouse' ? 'maintenance' : 'disponible',
+                // Un changement d'etat physique ne modifie pas le statut logistique.
+                'modification_etat' => $currentStatus !== '' ? $currentStatus : 'disponible',
                 default => 'disponible',
             };
             $this->db->prepare('UPDATE equipements SET statut = :statut WHERE id = :id')

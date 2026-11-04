@@ -206,7 +206,7 @@ window.ITAM_EQUIPMENT_CATEGORY_BASE = <?= json_encode(base_url('equipements/cate
                 <option value="attribuer_site">Attribuer a un site</option>
                 <option value="retour_disponible">Retour disponible</option>
                 <option value="mettre_en_maintenance">Mettre en maintenance</option>
-                <option value="declasser">Declasser</option>
+                <?php if (Auth::canDeclassify()): ?><option value="declasser">Declasser</option><?php endif; ?>
             </select>
             <select name="bulk_user_id" id="bulk-user-wrap" class="form-select form-select-sm" data-searchable data-placeholder="Nom ou PF de l utilisateur">
                 <option value="">Choisir l'utilisateur</option>

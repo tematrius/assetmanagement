@@ -144,7 +144,11 @@ $attrs = $equipement['attributs'] ?? [];
 
         <div class="card p-3 mb-3 border-primary">
             <h6 class="mb-3">Actions de fiche</h6>
-            <?php if ($modeGestion === 'unique'): ?>
+            <?php if ($modeGestion === 'unique' && (string) ($equipement['statut'] ?? '') === 'declasse'): ?>
+                <div class="alert alert-secondary mb-0">
+                    Equipement declasse : aucune attribution, maintenance ou retour n'est possible.
+                </div>
+            <?php elseif ($modeGestion === 'unique'): ?>
                 <div class="accordion" id="equipmentActionsAccordion">
                     <div class="accordion-item">
                         <h2 class="accordion-header" id="headingAssign">
@@ -238,6 +242,7 @@ $attrs = $equipement['attributs'] ?? [];
                         </div>
                     </div>
 
+                    <?php if (Auth::canDeclassify()): ?>
                     <div class="accordion-item">
                         <h2 class="accordion-header" id="headingDeclassify">
                             <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDeclassify">
@@ -254,6 +259,7 @@ $attrs = $equipement['attributs'] ?? [];
                             </div>
                         </div>
                     </div>
+                    <?php endif; ?>
                 </div>
             <?php else: ?>
                 <div class="alert alert-success mb-0">

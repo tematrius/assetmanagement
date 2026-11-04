@@ -60,12 +60,18 @@
                     <div class="col-md-4"><label class="form-label">Serial number *</label><input name="serial_number" class="form-control" value="<?= e($equipement['serial_number']) ?>" required></div>
                     <div class="col-md-4">
                         <label class="form-label">Statut</label>
+                        <?php if ((string) $equipement['statut'] === 'declasse'): ?>
+                            <input type="hidden" name="statut" value="declasse">
+                            <div class="form-control bg-light">declasse</div>
+                            <small class="text-muted d-block mt-1">Un equipement declasse ne peut pas etre reactive depuis ce formulaire.</small>
+                        <?php else: ?>
                         <select name="statut" id="equipement_statut" class="form-select">
-                            <?php foreach (['disponible', 'attribue', 'maintenance', 'hors_service'] as $st): ?>
+                            <?php foreach (Auth::canDeclassify() ? ['disponible', 'attribue', 'maintenance', 'hors_service'] : ['disponible', 'attribue', 'maintenance'] as $st): ?>
                                 <option value="<?= e($st) ?>" <?= $equipement['statut'] === $st ? 'selected' : '' ?>><?= e($st) ?></option>
                             <?php endforeach; ?>
                         </select>
                         <small class="text-muted d-block mt-1">L'attribution directe se fait depuis la fiche equipement.</small>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Info</label>

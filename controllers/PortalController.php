@@ -31,7 +31,7 @@ class PortalController extends Controller
             'totalRequests' => count($allRequests),
             'pendingCount' => count(array_filter($allRequests, static fn (array $request): bool => in_array((string) $request['statut'], ['soumis', 'validation_responsable', 'validation_it', 'correction_requise'], true))),
             'approvedCount' => count(array_filter($allRequests, static fn (array $request): bool => in_array((string) $request['statut'], ['approuve', 'attribue', 'cloture'], true))),
-            'archivedCount' => count(array_filter($allRequests, static fn (array $request): bool => in_array((string) $request['statut'], ['approuve', 'rejete', 'attribue', 'cloture'], true))),
+            'archivedCount' => count(array_filter($allRequests, static fn (array $request): bool => in_array((string) $request['statut'], ['rejete', 'cloture'], true))),
         ]);
     }
 

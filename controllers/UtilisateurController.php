@@ -238,8 +238,20 @@ class UtilisateurController extends Controller
         $data['mot_de_passe'] = $initialPassword;
         $data['doit_changer_mot_de_passe'] = 1;
 
-        $userId = $this->model->create($data);
-        $this->model->syncValidators($userId, $_POST['validateur_ids'] ?? []);
+        $db = Database::connection();
+        try {
+            $db->beginTransaction();
+            $userId = $this->model->create($data);
+            $this->model->syncValidators($userId, $_POST['validateur_ids'] ?? []);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            flash('error', $this->friendlyDbError($e, 'Creation impossible'));
+            remember_old_input($_POST);
+            redirect('utilisateurs/create');
+        }
 
         clear_old_input();
         flash('success', 'Utilisateur cree. Mot de passe initial: ' . $initialPassword);
@@ -274,21 +286,34 @@ class UtilisateurController extends Controller
 
         $utilisateurId = (int) $id;
         $data = $this->validatedUserPayload('utilisateurs/' . $id . '/edit', $utilisateurId);
-        $this->model->update($utilisateurId, $data);
-        $this->model->syncValidators($utilisateurId, $_POST['validateur_ids'] ?? []);
 
         $newPassword = trim((string) ($_POST['new_password'] ?? ''));
-        if ($newPassword !== '') {
-            if (strlen($newPassword) < 8) {
-                flash('error', 'Le nouveau mot de passe doit contenir au moins 8 caracteres.');
-                remember_old_input($_POST);
-                redirect('utilisateurs/' . $id . '/edit');
-            }
-            $this->model->updatePassword($utilisateurId, $newPassword, true);
-            flash('success', 'Utilisateur modifie. Nouveau mot de passe temporaire applique.');
-        } else {
-            flash('success', 'Utilisateur modifie.');
+        if ($newPassword !== '' && strlen($newPassword) < 8) {
+            // Verifie avant toute ecriture pour ne pas enregistrer une modification partielle.
+            flash('error', 'Le nouveau mot de passe doit contenir au moins 8 caracteres.');
+            remember_old_input($_POST);
+            redirect('utilisateurs/' . $id . '/edit');
         }
+
+        $db = Database::connection();
+        try {
+            $db->beginTransaction();
+            $this->model->update($utilisateurId, $data);
+            $this->model->syncValidators($utilisateurId, $_POST['validateur_ids'] ?? []);
+            if ($newPassword !== '') {
+                $this->model->updatePassword($utilisateurId, $newPassword, true);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            flash('error', $this->friendlyDbError($e, 'Modification impossible'));
+            remember_old_input($_POST);
+            redirect('utilisateurs/' . $id . '/edit');
+        }
+
+        flash('success', $newPassword !== '' ? 'Utilisateur modifie. Nouveau mot de passe temporaire applique.' : 'Utilisateur modifie.');
 
         clear_old_input();
         redirect('utilisateurs/' . $id);
@@ -312,9 +337,36 @@ class UtilisateurController extends Controller
         Auth::requireRole(['Admin']);
         $this->validateCsrf();
 
-        $this->model->delete((int) $id);
-        flash('success', 'Utilisateur supprime.');
+        $userId = (int) $id;
+        if ($userId === Auth::id()) {
+            flash('error', 'Vous ne pouvez pas supprimer votre propre compte.');
+            redirect('utilisateurs/' . $userId);
+        }
+
+        try {
+            $result = $this->model->deleteOrDeactivate($userId);
+        } catch (Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('utilisateurs/' . $userId);
+        }
+
+        flash('success', $result === 'deleted'
+            ? 'Utilisateur supprime.'
+            : 'Utilisateur desactive : son historique (demandes, attributions, mouvements) est conserve pour la tracabilite.');
         redirect('utilisateurs');
+    }
+
+    private function friendlyDbError(Throwable $e, string $prefix): string
+    {
+        if ($e instanceof PDOException && (string) $e->getCode() === '23000') {
+            $message = $e->getMessage();
+            if (stripos($message, 'Duplicate') !== false) {
+                return $prefix . ' : un utilisateur avec ce username, matricule ou email existe deja.';
+            }
+            return $prefix . ' : donnees liees invalides (role, fonction ou validateur).';
+        }
+
+        return $prefix . ' : ' . $e->getMessage();
     }
 
     private function validatedUserPayload(string $redirectTo, ?int $currentId = null): array

@@ -136,48 +136,55 @@ class EquipementController extends Controller
             redirect('equipements/import');
         }
 
-        $path = (string) ($file['tmp_name'] ?? '');
-        $handle = fopen($path, 'rb');
-        if ($handle === false) {
-            flash('error', 'Impossible de lire le fichier.');
+        try {
+            $rawRows = read_tabular_file((string) ($file['tmp_name'] ?? ''), (string) ($file['name'] ?? ''));
+        } catch (Throwable $e) {
+            flash('error', 'Lecture impossible : ' . $e->getMessage());
             redirect('equipements/import');
         }
 
-        $firstLine = (string) fgets($handle);
-        rewind($handle);
-        $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
+        // En-tetes insensibles a la casse et aux espaces ("Serial Number" == "serial_number").
+        $rows = [];
+        foreach ($rawRows as $raw) {
+            $line = [];
+            foreach ($raw as $header => $value) {
+                $line[str_replace(' ', '_', strtolower(trim((string) $header)))] = $value;
+            }
+            $rows[] = $line;
+        }
 
-        $headers = fgetcsv($handle, 0, $delimiter);
-        if (!$headers) {
-            fclose($handle);
-            flash('error', 'Entetes CSV introuvables.');
+        if ($rows === []) {
+            flash('error', 'Aucune ligne a importer.');
+            redirect('equipements/import');
+        }
+        $first = $rows[0];
+        if ((!array_key_exists('type', $first) && !array_key_exists('categorie', $first)) || !array_key_exists('serial_number', $first)) {
+            flash('error', 'Colonnes requises : type (ou categorie) et serial_number.');
             redirect('equipements/import');
         }
 
-        $headers = array_map(static fn ($h) => strtolower(trim((string) $h)), $headers);
-        if (!in_array('type', $headers, true) || !in_array('serial_number', $headers, true)) {
-            fclose($handle);
-            flash('error', 'Colonnes requises: type, serial_number');
-            redirect('equipements/import');
-        }
+        // Colonnes qui alimentent les champs de la fiche (et non des caracteristiques).
+        $standardColumns = [
+            'type', 'categorie', 'serial_number', 'hostname', 'code_inventaire', 'marque', 'modele', 'designation',
+            'etat', 'emplacement', 'fournisseur', 'notes', 'date_achat', 'date_mise_service', 'annee_estimee',
+            'date_fiabilite', 'statut', 'utilisateur_matricule', 'site_attribution',
+        ];
+        $canCreateAttributes = Auth::isAdmin();
+        $db = Database::connection();
 
         $created = 0;
         $skipped = 0;
         $messages = [];
+        $ignoredColumns = [];
         $lineNo = 1;
 
-        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+        foreach ($rows as $data) {
             $lineNo++;
-            if ($row === [null] || count(array_filter($row, static fn ($v) => trim((string) $v) !== '')) === 0) {
-                continue;
-            }
 
-            $data = [];
-            foreach ($headers as $i => $header) {
-                $data[$header] = trim((string) ($row[$i] ?? ''));
+            $typeName = $data['type'] ?? '';
+            if ($typeName === '') {
+                $typeName = $data['categorie'] ?? '';
             }
-
-            $typeName = $data['type'] ?? ($data['categorie'] ?? '');
             $category = $this->categories->findByName($typeName);
             if ($category === null || (string) ($category['mode_gestion'] ?? '') !== 'unique') {
                 $skipped++;
@@ -193,72 +200,116 @@ class EquipementController extends Controller
                 continue;
             }
 
-            $status = $data['statut'] ?? 'disponible';
-            if (!in_array($status, ['disponible', 'attribue', 'maintenance', 'hors_service'], true)) {
+            $status = strtolower($data['statut'] ?? '');
+            if ($status === '') {
                 $status = 'disponible';
+            }
+            if ($status === 'hors_service') {
+                $status = 'declasse';
+            }
+            if (!in_array($status, ['disponible', 'attribue', 'maintenance', 'declasse'], true)) {
+                $skipped++;
+                $messages[] = 'Ligne ' . $lineNo . ': statut inconnu (' . $status . ')';
+                continue;
             }
 
             $siteAssignment = $data['site_attribution'] ?? '';
             $userMatricule = $data['utilisateur_matricule'] ?? '';
             $assignee = $userMatricule !== '' ? $this->utilisateurs->findByMatricule($userMatricule) : null;
             $assigneeId = $assignee ? (int) $assignee['id'] : 0;
+            $isPrinter = str_contains(strtolower((string) $category['nom']), 'imprimante');
+            $isSite = $siteAssignment !== '' && $assigneeId <= 0;
 
-            $typeNameLower = strtolower((string) $category['nom']);
-            $isPrinter = str_contains($typeNameLower, 'imprimante');
-
-            if ($status === 'attribue' && $isPrinter && $siteAssignment === '') {
+            if ($status === 'attribue' && $isSite === false && $assigneeId <= 0) {
                 $skipped++;
-                $messages[] = 'Ligne ' . $lineNo . ': site_attribution requis pour imprimante attribuee';
+                $messages[] = 'Ligne ' . $lineNo . ': utilisateur_matricule ou site_attribution requis pour un equipement attribue';
                 continue;
-            }
-
-            if ($status === 'attribue' && !$isPrinter && $assigneeId <= 0) {
-                $skipped++;
-                $messages[] = 'Ligne ' . $lineNo . ': utilisateur_matricule invalide pour equipement attribue';
-                continue;
-            }
-
-            $base = [
-                'categorie_id' => $categoryId,
-                'serial_number' => $serial,
-                'hostname' => $data['hostname'] ?? '',
-                'marque' => $data['marque'] ?? '',
-                'statut' => $status,
-                'created_by' => (int) (Auth::user()['id'] ?? 0),
-            ];
-
-            $attrs = [];
-            foreach ($data as $key => $value) {
-                if ($value === '' || in_array($key, ['type', 'serial_number', 'hostname', 'marque', 'statut', 'utilisateur_matricule', 'site_attribution'], true)) {
-                    continue;
-                }
-
-                $attrName = str_replace('_', ' ', $key);
-                $attrId = $this->categories->ensureAttribute($categoryId, $attrName);
-                $attrs[(string) $attrId] = $value;
-            }
-
-            if ($siteAssignment !== '') {
-                $siteAttrId = $this->categories->ensureAttribute($categoryId, 'Site attribution');
-                $attrs[(string) $siteAttrId] = $siteAssignment;
             }
 
             try {
+                $dateAchat = parse_date_input_strict($data['date_achat'] ?? null, 'Date d\'achat');
+                $dateService = parse_date_input_strict($data['date_mise_service'] ?? null, 'Date de mise en service');
+                $estimatedYear = trim((string) ($data['annee_estimee'] ?? ''));
+                $reliability = strtolower(trim((string) ($data['date_fiabilite'] ?? '')));
+                if (!in_array($reliability, ['exacte', 'approximative', 'inconnue'], true)) {
+                    $reliability = ($dateAchat !== null || $dateService !== null)
+                        ? 'exacte'
+                        : ($estimatedYear !== '' ? 'approximative' : 'inconnue');
+                }
+
+                $base = [
+                    'categorie_id' => $categoryId,
+                    'serial_number' => $serial,
+                    'hostname' => $data['hostname'] ?? ($data['code_inventaire'] ?? ''),
+                    'code_inventaire' => ($data['code_inventaire'] ?? '') !== '' ? $data['code_inventaire'] : ($data['hostname'] ?? ''),
+                    'marque' => $data['marque'] ?? '',
+                    'modele' => $data['modele'] ?? '',
+                    'designation' => $data['designation'] ?? '',
+                    'etat' => ($data['etat'] ?? '') !== '' ? $data['etat'] : 'bon',
+                    'emplacement' => $data['emplacement'] ?? '',
+                    'fournisseur' => $data['fournisseur'] ?? '',
+                    'notes' => $data['notes'] ?? '',
+                    'date_achat' => $dateAchat,
+                    'date_mise_service' => $dateService,
+                    'date_fiabilite' => $reliability,
+                    'annee_estimee' => $estimatedYear,
+                    'statut' => $status,
+                    'created_by' => (int) (Auth::user()['id'] ?? 0),
+                ];
+
+                // Colonnes restantes : caracteristiques existantes de la categorie.
+                $existing = [];
+                foreach ($this->categories->attributesByCategory($categoryId) as $attribute) {
+                    $existing[strtolower(str_replace(' ', '_', trim((string) $attribute['nom'])))] = (int) $attribute['id'];
+                }
+
+                $db->beginTransaction();
+                $attrs = [];
+                foreach ($data as $key => $value) {
+                    if ($value === '' || in_array($key, $standardColumns, true)) {
+                        continue;
+                    }
+                    if (isset($existing[$key])) {
+                        $attrs[(string) $existing[$key]] = $value;
+                    } elseif ($canCreateAttributes) {
+                        $attrs[(string) $this->categories->ensureAttribute($categoryId, str_replace('_', ' ', $key))] = $value;
+                    } else {
+                        $ignoredColumns[$key] = true;
+                    }
+                }
+                if ($siteAssignment !== '') {
+                    $siteAttrId = $this->categories->ensureAttribute($categoryId, 'Site attribution');
+                    $attrs[(string) $siteAttrId] = $siteAssignment;
+                }
+
                 $equipementId = $this->equipements->create($base, $attrs);
-                $this->syncAssignmentMovement($equipementId, $status, $assigneeId, $siteAssignment, $isPrinter);
+                $this->syncAssignmentMovement(
+                    $equipementId,
+                    $status,
+                    $isSite ? 0 : $assigneeId,
+                    $isSite ? $siteAssignment : '',
+                    $isSite || ($isPrinter && $siteAssignment !== ''),
+                    [],
+                    'Import'
+                );
+                $db->commit();
                 $created++;
             } catch (Throwable $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
                 $skipped++;
-                $messages[] = 'Ligne ' . $lineNo . ': erreur import (' . $e->getMessage() . ')';
+                $messages[] = 'Ligne ' . $lineNo . ': ' . $e->getMessage();
             }
         }
 
-        fclose($handle);
-
         $summary = 'Import termine. Crees: ' . $created . ', ignores: ' . $skipped . '.';
+        if ($ignoredColumns !== []) {
+            $summary .= ' Colonnes non reconnues (caracteristiques a creer par un administrateur) : ' . implode(', ', array_keys($ignoredColumns)) . '.';
+        }
         flash('success', $summary);
         if ($messages !== []) {
-            flash('error', implode(' | ', array_slice($messages, 0, 5)));
+            flash('error', implode(' | ', array_slice($messages, 0, 5)) . (count($messages) > 5 ? ' ... (' . count($messages) . ' erreurs)' : ''));
         }
 
         redirect('equipements');
@@ -417,8 +468,10 @@ class EquipementController extends Controller
 
         $mouvementModel = new Mouvement();
         $currentHolderId = $mouvementModel->currentHolderId($equipementId);
-        if ($currentHolderId === null) {
-            flash('error', 'Aucun utilisateur actuel pour effectuer un transfert.');
+        // Un equipement affecte a un site (sans personne) peut aussi etre transfere vers un utilisateur.
+        $currentSite = $currentHolderId === null ? $this->currentSiteAssignmentFor($equipement) : '';
+        if ($currentHolderId === null && $currentSite === '') {
+            flash('error', 'Aucun utilisateur ni site actuel : utilisez plutot l\'attribution.');
             redirect('equipements/' . $equipementId);
         }
 
@@ -431,10 +484,10 @@ class EquipementController extends Controller
             $mouvementModel->create([
                 'equipement_id' => $equipementId,
                 'type_mouvement' => 'transfert',
-                'utilisateur_source_id' => $currentHolderId,
+                'utilisateur_source_id' => $currentHolderId ?? '',
                 'utilisateur_destination_id' => $destinationUserId,
-                'source_type' => 'utilisateur',
-                'source_label' => '',
+                'source_type' => $currentHolderId !== null ? 'utilisateur' : 'site',
+                'source_label' => $currentHolderId !== null ? '' : $currentSite,
                 'destination_type' => 'utilisateur',
                 'destination_label' => '',
                 'commentaire' => $commentaire !== '' ? $commentaire : 'Transfert depuis la fiche equipement',
@@ -471,19 +524,34 @@ class EquipementController extends Controller
         $mouvementModel = new Mouvement();
         $currentHolderId = $mouvementModel->currentHolderId($equipementId);
 
-        if ($currentHolderId === null) {
+        $currentStatus = (string) ($equipement['statut'] ?? '');
+        $currentSite = $currentHolderId === null ? $this->currentSiteAssignmentFor($equipement) : '';
+
+        if ($currentHolderId === null && $currentSite === '' && $currentStatus !== 'maintenance' && $currentStatus !== 'attribue') {
             flash('error', 'Cet equipement est deja au stock.');
             redirect('equipements/' . $equipementId);
+        }
+
+        // Source du retour : la personne, le site d'affectation ou l'atelier de maintenance.
+        if ($currentHolderId !== null) {
+            $sourceType = 'utilisateur';
+            $sourceLabel = '';
+        } elseif ($currentStatus === 'maintenance') {
+            $sourceType = 'warehouse';
+            $sourceLabel = $this->defaultWarehouse;
+        } else {
+            $sourceType = 'site';
+            $sourceLabel = $currentSite !== '' ? $currentSite : 'Site';
         }
 
         try {
             $mouvementModel->create([
                 'equipement_id' => $equipementId,
                 'type_mouvement' => 'retour',
-                'utilisateur_source_id' => $currentHolderId,
+                'utilisateur_source_id' => $currentHolderId ?? '',
                 'utilisateur_destination_id' => '',
-                'source_type' => 'utilisateur',
-                'source_label' => '',
+                'source_type' => $sourceType,
+                'source_label' => $sourceLabel,
                 'destination_type' => 'depot',
                 'destination_label' => $this->defaultDepot,
                 'commentaire' => $commentaire !== '' ? $commentaire : 'Retour vers le stock IT',
@@ -647,9 +715,15 @@ class EquipementController extends Controller
                 $assigneeId = 0;
             } else {
                 $siteAssignment = '';
+                if (!$this->utilisateurs->find($assigneeId)) {
+                    flash('error', 'Utilisateur d\'attribution introuvable.');
+                    remember_old_input($_POST);
+                    redirect('equipements/create');
+                }
             }
         }
 
+        $db = Database::connection();
         try {
             $_POST['categorie_id'] = $categorieId;
             $_POST['hostname'] = trim((string) ($_POST['hostname'] ?? '')) ?: null;
@@ -658,12 +732,14 @@ class EquipementController extends Controller
             $_POST['utilisateur_attribution_id'] = $assigneeId > 0 ? (string) $assigneeId : '';
             $_POST['site_attribution'] = $siteAssignment;
             $_POST['site_attribution_input'] = $siteAssignment;
-            $_POST['date_achat'] = parse_date_input($_POST['date_achat'] ?? null);
-            $_POST['date_mise_service'] = parse_date_input($_POST['date_mise_service'] ?? null);
+            $_POST['date_achat'] = parse_date_input_strict($_POST['date_achat'] ?? null, 'Date d\'achat');
+            $_POST['date_mise_service'] = parse_date_input_strict($_POST['date_mise_service'] ?? null, 'Date de mise en service');
             $_POST['date_fiabilite'] = (string) ($_POST['date_fiabilite'] ?? 'inconnue');
             $_POST['annee_estimee'] = trim((string) ($_POST['annee_estimee'] ?? ''));
 
             $attributes = $this->buildAttributesFromCategory($categorieId, $_POST['attributs'] ?? []);
+            // Creation + attribution + historique : tout ou rien.
+            $db->beginTransaction();
             $equipementId = $this->equipements->create($_POST, $attributes);
 
             $this->syncAssignmentMovement(
@@ -675,11 +751,15 @@ class EquipementController extends Controller
                 $this->normalizeLogistics($_POST),
                 trim((string) ($_POST['statut_commentaire'] ?? ''))
             );
+            $db->commit();
 
             clear_old_input();
             flash('success', 'Equipement cree avec succes.');
             redirect('equipements/' . $equipementId);
         } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             flash('error', 'Erreur lors de la creation: ' . $e->getMessage());
             remember_old_input($_POST);
             redirect('equipements/create');
@@ -697,18 +777,8 @@ class EquipementController extends Controller
             return;
         }
 
-        $currentSite = '';
-        foreach ($equipement['attributs'] as $attr) {
-            if (strtolower((string) $attr['attribut_nom']) === 'site attribution') {
-                $currentSite = (string) $attr['valeur'];
-                break;
-            }
-        }
-
+        $currentSite = $this->currentSiteAssignmentFor($equipement);
         $lastMovement = (new Mouvement())->historyByEquipement((int) $id)[0] ?? [];
-        if ($currentSite === '' && (string) ($lastMovement['destination_type'] ?? '') === 'site') {
-            $currentSite = (string) ($lastMovement['destination_label'] ?? '');
-        }
 
         $this->view('equipements/edit', [
             'title' => 'Modifier equipement',
@@ -764,15 +834,34 @@ class EquipementController extends Controller
         if (!in_array($assignmentTargetType, ['personne', 'site'], true)) {
             $assignmentTargetType = 'personne';
         }
-        $logistics = $this->normalizeLogistics($_POST);
-        $isSiteAssignment = $assignmentTargetType === 'site' || $siteAssignment !== '' || $logistics['destination_type'] === 'site';
+        $previousStatus = (string) ($equipement['statut'] ?? 'disponible');
+        $previousHolderId = (int) ((new Mouvement())->currentHolderId($equipementId) ?? 0);
+        $previousSite = $this->currentSiteAssignmentFor($equipement);
 
-        if ($logistics['destination_type'] === 'utilisateur' || $logistics['destination_type'] === 'site') {
-            $status = 'attribue';
-        } elseif ($logistics['destination_type'] === 'warehouse') {
-            $status = 'hors_service';
-        } elseif ($logistics['destination_type'] === 'depot' && $status === 'attribue') {
-            $status = 'disponible';
+        // Un equipement declasse ne se reactive pas depuis le formulaire d'edition.
+        if ($previousStatus === 'declasse') {
+            $status = 'declasse';
+        } elseif (in_array($status, ['hors_service', 'declasse'], true) && !Auth::canDeclassify()) {
+            // Meme regle que l'action "Declasser" de la fiche : reservee a l'administrateur.
+            flash('error', 'Le declassement est reserve a l\'administrateur.');
+            remember_old_input($_POST);
+            redirect('equipements/' . $id . '/edit');
+        }
+
+        $logistics = $this->normalizeLogistics($_POST);
+        // Le formulaire d'edition ne poste pas de logistique : on ne deduit le statut
+        // de la destination que si elle a ete explicitement envoyee.
+        $hasLogistics = trim((string) ($_POST['destination_type'] ?? '')) !== '';
+        $isSiteAssignment = $assignmentTargetType === 'site' || ($hasLogistics && $logistics['destination_type'] === 'site');
+
+        if ($hasLogistics && $previousStatus !== 'declasse') {
+            if ($logistics['destination_type'] === 'utilisateur' || $logistics['destination_type'] === 'site') {
+                $status = 'attribue';
+            } elseif ($logistics['destination_type'] === 'warehouse') {
+                $status = 'hors_service';
+            } elseif ($logistics['destination_type'] === 'depot' && $status === 'attribue') {
+                $status = 'disponible';
+            }
         }
 
         $_POST['statut'] = $status;
@@ -812,24 +901,51 @@ class EquipementController extends Controller
             redirect('equipements/' . $id . '/edit');
         }
 
+        $db = Database::connection();
         try {
-            $_POST['categorie_id'] = $categorieId;
-            $_POST['hostname'] = (string) ($equipement['hostname'] ?? null);
-            $_POST['marque'] = (string) ($equipement['marque'] ?? null);
-            $_POST['date_achat'] = parse_date_input($_POST['date_achat'] ?? null);
-            $_POST['date_mise_service'] = parse_date_input($_POST['date_mise_service'] ?? null);
-            $_POST['date_fiabilite'] = (string) ($_POST['date_fiabilite'] ?? 'inconnue');
-            $_POST['annee_estimee'] = trim((string) ($_POST['annee_estimee'] ?? ''));
+            $data = $_POST;
+            $data['categorie_id'] = $categorieId;
+            $data['hostname'] = (string) ($equipement['hostname'] ?? '');
+            $data['marque'] = (string) ($equipement['marque'] ?? '');
+            // Champs absents du formulaire d'edition : on conserve les valeurs existantes
+            // (l'etat reel se change uniquement via "Changer l'etat").
+            foreach (['etat', 'designation', 'modele', 'emplacement', 'fournisseur', 'notes', 'code_inventaire'] as $field) {
+                if (!array_key_exists($field, $_POST)) {
+                    $data[$field] = $equipement[$field] ?? null;
+                }
+            }
+            $data['date_achat'] = parse_date_input_strict($_POST['date_achat'] ?? null, 'Date d\'achat');
+            $data['date_mise_service'] = parse_date_input_strict($_POST['date_mise_service'] ?? null, 'Date de mise en service');
+            $data['date_fiabilite'] = (string) ($_POST['date_fiabilite'] ?? 'inconnue');
+            $data['annee_estimee'] = trim((string) ($_POST['annee_estimee'] ?? ''));
 
             $attributes = $this->buildAttributesFromCategory($categorieId, $_POST['attributs'] ?? []);
 
-            $this->equipements->update($equipementId, $_POST, $attributes);
-            $this->syncAssignmentMovement($equipementId, $status, $assigneeId, $siteAssignment, $isSiteAssignment, $logistics, $statusReason);
+            $normalizedStatus = $status === 'hors_service' ? 'declasse' : $status;
+            $assignmentChanged = $normalizedStatus !== $previousStatus
+                || ($normalizedStatus === 'attribue' && (
+                    ($isSiteAssignment && $siteAssignment !== $previousSite)
+                    || (!$isSiteAssignment && $assigneeId !== $previousHolderId)
+                ));
+
+            $db->beginTransaction();
+            if (!$assignmentChanged) {
+                // Statut et detenteur inchanges : pas de mouvement ni d'historique parasite.
+                $data['statut'] = $previousStatus;
+            }
+            $this->equipements->update($equipementId, $data, $attributes);
+            if ($assignmentChanged) {
+                $this->syncAssignmentMovement($equipementId, $status, $assigneeId, $siteAssignment, $isSiteAssignment, $logistics, $statusReason);
+            }
+            $db->commit();
 
             clear_old_input();
             flash('success', 'Equipement modifie.');
-            redirect('equipements');
+            redirect('equipements/' . $equipementId);
         } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             flash('error', 'Modification impossible: ' . $e->getMessage());
             remember_old_input($_POST);
             redirect('equipements/' . $id . '/edit');
@@ -841,171 +957,178 @@ class EquipementController extends Controller
         Auth::requireRole(['Admin', 'IT Agent']);
         $this->validateCsrf();
 
-        $ids = array_values(array_unique(array_map('intval', $_POST['equipement_ids'] ?? [])));
+        $rawIds = $_POST['equipement_ids'] ?? [];
+        $ids = array_values(array_unique(array_map('intval', is_array($rawIds) ? $rawIds : [$rawIds])));
         $ids = array_values(array_filter($ids, static fn (int $id): bool => $id > 0));
         $action = (string) ($_POST['bulk_action'] ?? '');
+        if ($action === 'archive') {
+            // L'archivage est un declassement trace (historique + cloture de l'attribution).
+            $action = 'declasser';
+        }
 
         if ($ids === []) {
             flash('error', 'Aucun equipement selectionne.');
             redirect('equipements');
         }
 
-        if ($action === 'archive') {
+        $allowed = ['retour_disponible', 'attribuer_utilisateur', 'attribuer_site', 'mettre_en_maintenance', 'declasser'];
+        if (!in_array($action, $allowed, true)) {
+            flash('error', 'Action groupee inconnue.');
+            redirect('equipements');
+        }
+        if ($action === 'declasser') {
             Auth::requireRole(['Admin']);
-            $count = $this->equipements->archiveMany($ids);
-            flash('success', 'Equipements archives: ' . $count);
-            redirect('equipements');
         }
 
-        if ($action === 'retour_disponible') {
-            foreach ($ids as $id) {
-                $eq = $this->equipements->find($id);
-                if (!$eq) {
-                    continue;
-                }
-                $isPrinter = str_contains(strtolower((string) $eq['type_nom']), 'imprimante');
-                $this->syncAssignmentMovement($id, 'disponible', 0, '', $isPrinter);
-                $this->equipements->setStatus($id, 'disponible');
-            }
-            flash('success', 'Retour/disponible applique sur la selection.');
-            redirect('equipements');
-        }
-
+        $userId = 0;
+        $site = '';
         if ($action === 'attribuer_utilisateur') {
             $userId = (int) ($_POST['bulk_user_id'] ?? 0);
-            if ($userId <= 0) {
-                flash('error', 'Utilisateur requis pour attribution groupee.');
+            if ($userId <= 0 || !$this->utilisateurs->find($userId)) {
+                flash('error', 'Utilisateur valide requis pour attribution groupee.');
                 redirect('equipements');
             }
-
-            $done = 0;
-            foreach ($ids as $id) {
-                $eq = $this->equipements->find($id);
-                if (!$eq) {
-                    continue;
-                }
-                $isPrinter = str_contains(strtolower((string) $eq['type_nom']), 'imprimante');
-                if ($isPrinter) {
-                    continue;
-                }
-                $this->syncAssignmentMovement($id, 'attribue', $userId, '', false);
-                $done++;
-            }
-
-            flash('success', 'Attributions utilisateur appliquees: ' . $done);
-            redirect('equipements');
         }
-
         if ($action === 'attribuer_site') {
             $site = trim((string) ($_POST['bulk_site'] ?? ''));
             if ($site === '') {
                 flash('error', 'Site requis pour attribution groupee imprimantes.');
                 redirect('equipements');
             }
-
-            $done = 0;
-            foreach ($ids as $id) {
-                $eq = $this->equipements->find($id);
-                if (!$eq) {
-                    continue;
-                }
-                $isPrinter = str_contains(strtolower((string) $eq['type_nom']), 'imprimante');
-                if (!$isPrinter) {
-                    continue;
-                }
-
-                $attrs = [];
-                foreach ($eq['attributs'] as $at) {
-                    $attrs[(string) $at['attribut_id']] = (string) $at['valeur'];
-                }
-                $siteAttrId = $this->categories->ensureAttribute((int) $eq['categorie_id'], 'Site attribution');
-                $attrs[(string) $siteAttrId] = $site;
-
-                $this->equipements->update((int) $id, [
-                    'categorie_id' => (int) $eq['categorie_id'],
-                    'serial_number' => (string) $eq['serial_number'],
-                    'hostname' => (string) $eq['hostname'],
-                    'marque' => (string) $eq['marque'],
-                    'statut' => 'attribue',
-                    'etat' => (string) ($eq['etat'] ?? 'bon'),
-                    'date_achat' => $eq['date_achat'] ?? null,
-                    'date_mise_service' => $eq['date_mise_service'] ?? null,
-                    'date_fiabilite' => $eq['date_fiabilite'] ?? 'inconnue',
-                    'annee_estimee' => $eq['annee_estimee'] ?? null,
-                ], $attrs);
-
-                $this->syncAssignmentMovement((int) $id, 'attribue', 0, $site, true);
-                $done++;
-            }
-
-            flash('success', 'Attributions site appliquees: ' . $done);
-            redirect('equipements');
         }
 
-        if ($action === 'mettre_en_maintenance') {
-            $done = 0;
-            $mouvementModel = new Mouvement();
-            foreach ($ids as $id) {
-                $eq = $this->equipements->find($id);
-                if (!$eq) {
-                    continue;
-                }
+        $db = Database::connection();
+        $mouvementModel = new Mouvement();
+        $done = 0;
+        $skipped = 0;
+        $errors = [];
 
-                $currentHolderId = $mouvementModel->currentHolderId((int) $id);
-
-                $mouvementModel->create([
-                    'equipement_id' => $id,
-                    'type_mouvement' => 'maintenance',
-                    'utilisateur_source_id' => $currentHolderId ? (string) $currentHolderId : '',
-                    'utilisateur_destination_id' => '',
-                    'source_type' => $currentHolderId ? 'utilisateur' : 'depot',
-                    'source_label' => $currentHolderId ? '' : $this->defaultDepot,
-                    'destination_type' => 'warehouse',
-                    'destination_label' => $this->defaultWarehouse,
-                    'commentaire' => 'Maintenance groupee',
-                ]);
-
-                $this->equipements->setStatus((int) $id, 'maintenance');
-                $done++;
+        foreach ($ids as $id) {
+            $eq = $this->equipements->find($id);
+            if (!$eq || !$this->isUniqueEquipment($eq) || (string) $eq['statut'] === 'declasse') {
+                $skipped++;
+                continue;
             }
+            $label = (string) ($eq['serial_number'] ?? ('#' . $id));
+            $isPrinter = str_contains(strtolower((string) $eq['type_nom']), 'imprimante');
+            $holderId = $mouvementModel->currentHolderId($id);
 
-            flash('success', 'Equipements passes en maintenance: ' . $done);
-            redirect('equipements');
+            try {
+                switch ($action) {
+                    case 'retour_disponible':
+                        $source = $this->returnSourceFor($eq, $holderId);
+                        if ($source === null) {
+                            $skipped++;
+                            continue 2;
+                        }
+                        $mouvementModel->create([
+                            'equipement_id' => $id,
+                            'type_mouvement' => 'retour',
+                            'utilisateur_source_id' => $holderId ?? '',
+                            'utilisateur_destination_id' => '',
+                            'source_type' => $source[0],
+                            'source_label' => $source[1],
+                            'destination_type' => 'depot',
+                            'destination_label' => $this->defaultDepot,
+                            'commentaire' => 'Retour groupe vers le stock IT',
+                        ]);
+                        break;
+
+                    case 'attribuer_utilisateur':
+                        if ($isPrinter || $holderId === $userId || (string) $eq['statut'] === 'maintenance') {
+                            $skipped++;
+                            continue 2;
+                        }
+                        $db->beginTransaction();
+                        $this->syncAssignmentMovement($id, 'attribue', $userId, '', false, [], 'Attribution groupee');
+                        $db->commit();
+                        break;
+
+                    case 'attribuer_site':
+                        if (!$isPrinter || (string) $eq['statut'] === 'maintenance') {
+                            $skipped++;
+                            continue 2;
+                        }
+                        $attrs = [];
+                        foreach ($eq['attributs'] as $at) {
+                            $attrs[(string) $at['attribut_id']] = (string) $at['valeur'];
+                        }
+                        $db->beginTransaction();
+                        $siteAttrId = $this->categories->ensureAttribute((int) $eq['categorie_id'], 'Site attribution');
+                        $attrs[(string) $siteAttrId] = $site;
+                        // On repart de la fiche complete pour ne perdre aucun champ.
+                        $data = $eq;
+                        $data['statut'] = 'attribue';
+                        $this->equipements->update($id, $data, $attrs);
+                        $this->syncAssignmentMovement($id, 'attribue', 0, $site, true, [], 'Attribution groupee');
+                        $db->commit();
+                        break;
+
+                    case 'mettre_en_maintenance':
+                    case 'declasser':
+                        $isMaintenance = $action === 'mettre_en_maintenance';
+                        if ($isMaintenance && (string) $eq['statut'] === 'maintenance') {
+                            $skipped++;
+                            continue 2;
+                        }
+                        $mouvementModel->create([
+                            'equipement_id' => $id,
+                            'type_mouvement' => $isMaintenance ? 'maintenance' : 'declassement',
+                            'utilisateur_source_id' => $holderId ? (string) $holderId : '',
+                            'utilisateur_destination_id' => '',
+                            'source_type' => $holderId ? 'utilisateur' : 'depot',
+                            'source_label' => $holderId ? '' : $this->defaultDepot,
+                            'destination_type' => 'warehouse',
+                            'destination_label' => $isMaintenance ? $this->defaultWarehouse : 'Declasse',
+                            'commentaire' => $isMaintenance ? 'Maintenance groupee' : 'Declassement groupe',
+                        ]);
+                        break;
+                }
+                $done++;
+            } catch (Throwable $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+                $errors[] = $label . ' : ' . $e->getMessage();
+            }
         }
 
-        if ($action === 'declasser') {
-            $done = 0;
-            $mouvementModel = new Mouvement();
-            foreach ($ids as $id) {
-                $eq = $this->equipements->find($id);
-                if (!$eq) {
-                    continue;
-                }
-
-                $currentHolderId = $mouvementModel->currentHolderId((int) $id);
-
-                $mouvementModel->create([
-                    'equipement_id' => $id,
-                    'type_mouvement' => 'declassement',
-                    'utilisateur_source_id' => $currentHolderId ? (string) $currentHolderId : '',
-                    'utilisateur_destination_id' => '',
-                    'source_type' => $currentHolderId ? 'utilisateur' : 'depot',
-                    'source_label' => $currentHolderId ? '' : $this->defaultDepot,
-                    'destination_type' => 'warehouse',
-                    'destination_label' => 'Déclassé',
-                    'commentaire' => 'Déclassement groupee',
-                ]);
-
-                $this->equipements->setStatus((int) $id, 'declasse');
-                $done++;
-            }
-
-            flash('success', 'Equipements declasses: ' . $done);
-            redirect('equipements');
+        $labels = [
+            'retour_disponible' => 'Retours au stock',
+            'attribuer_utilisateur' => 'Attributions utilisateur',
+            'attribuer_site' => 'Attributions site',
+            'mettre_en_maintenance' => 'Passages en maintenance',
+            'declasser' => 'Declassements',
+        ];
+        $message = $labels[$action] . ' : ' . $done . ' effectue(s)';
+        if ($skipped > 0) {
+            $message .= ', ' . $skipped . ' ignore(s) (deja dans cet etat, declasse ou non concerne)';
         }
-
-        flash('error', 'Action groupee inconnue.');
+        if ($errors !== []) {
+            $message .= '. Echecs : ' . implode(' | ', array_slice($errors, 0, 5)) . (count($errors) > 5 ? ' ...' : '');
+        }
+        flash($errors === [] ? 'success' : 'error', $message . '.');
         redirect('equipements');
+    }
+
+    /**
+     * Source d'un retour au stock : [type, libelle], ou null si l'equipement est deja au stock.
+     */
+    private function returnSourceFor(array $equipement, ?int $holderId): ?array
+    {
+        if ($holderId !== null) {
+            return ['utilisateur', ''];
+        }
+        $status = (string) ($equipement['statut'] ?? '');
+        if ($status === 'maintenance') {
+            return ['warehouse', $this->defaultWarehouse];
+        }
+        if ($status === 'attribue') {
+            $site = $this->currentSiteAssignmentFor($equipement);
+            return ['site', $site !== '' ? $site : 'Site'];
+        }
+
+        return null;
     }
 
     public function attributes(string $categoryId): void
@@ -1175,6 +1298,34 @@ class EquipementController extends Controller
         }
 
         $this->equipements->setStatus($equipementId, $status);
+    }
+
+    /**
+     * Site d'affectation courant d'un equipement attribue sans detenteur personne
+     * (imprimantes, materiel de site). Chaine vide sinon.
+     */
+    private function currentSiteAssignmentFor(array $equipement): string
+    {
+        $equipementId = (int) ($equipement['id'] ?? 0);
+        if ((string) ($equipement['statut'] ?? '') !== 'attribue') {
+            return '';
+        }
+        $db = Database::connection();
+        if ($this->currentV2HolderId($db, $equipementId) !== null) {
+            return '';
+        }
+        foreach ($equipement['attributs'] ?? [] as $attr) {
+            if (strtolower((string) ($attr['attribut_nom'] ?? '')) === 'site attribution' && trim((string) $attr['valeur']) !== '') {
+                return (string) $attr['valeur'];
+            }
+        }
+        foreach ($this->historyV2ByEquipement($db, $equipementId) as $movement) {
+            if ((string) ($movement['destination_type'] ?? '') === 'site' && trim((string) ($movement['destination_label'] ?? '')) !== '') {
+                return (string) $movement['destination_label'];
+            }
+        }
+
+        return '';
     }
 
     private function currentV2HolderId(PDO $db, int $equipementId): ?int
@@ -1348,11 +1499,9 @@ class EquipementController extends Controller
                 $commentaire,
                 (string) (Auth::user()['username'] ?? 'system')
             );
-            $_SESSION['success'] = 'État de l\'équipement modifié avec succès';
             flash('success', 'Etat de l\'equipement modifie avec succes.');
             redirect("equipements/{$equipementId}");
-        } catch (\Exception $e) {
-            $_SESSION['error'] = 'Erreur: ' . $e->getMessage();
+        } catch (\Throwable $e) {
             flash('error', 'Erreur: ' . $e->getMessage());
             redirect("equipements/{$equipementId}");
         }

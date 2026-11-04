@@ -766,7 +766,7 @@ class Equipement extends Model
         if (!empty($equipement['date_mise_service'])) {
             try {
                 $date = new \DateTime($equipement['date_mise_service']);
-                $age = $today - (int) $date->format('Y');
+                $age = $this->fullYearsSince($date);
                 return max(0, $age);
             } catch (\Exception $e) {
                 // Invalid date, fall through
@@ -777,7 +777,7 @@ class Equipement extends Model
         if (!empty($equipement['date_achat'])) {
             try {
                 $date = new \DateTime($equipement['date_achat']);
-                $age = $today - (int) $date->format('Y');
+                $age = $this->fullYearsSince($date);
                 return max(0, $age);
             } catch (\Exception $e) {
                 // Invalid date, fall through
@@ -803,6 +803,9 @@ class Equipement extends Model
             try {
                 $date = new \DateTime((string) $candidate);
                 $now = new \DateTime();
+                if ($date > $now) {
+                    return 0.0;
+                }
                 $diff = $date->diff($now);
                 return max(0.0, (float) $diff->y + ((float) $diff->m / 12.0) + ((float) $diff->d / 365.25));
             } catch (\Exception $e) {
@@ -814,10 +817,45 @@ class Equipement extends Model
         return $estimatedYear > 0 ? max(0.0, (float) date('Y') - $estimatedYear) : null;
     }
 
+    /**
+     * Nombre d'annees revolues depuis une date (0 si la date est dans le futur).
+     */
+    private function fullYearsSince(\DateTimeInterface $date): int
+    {
+        $now = new \DateTime();
+        if ($date > $now) {
+            return 0;
+        }
+
+        return $date->diff($now)->y;
+    }
+
+    private array $rulesCache = [];
+
     private function theoreticalRulesForCategory(int $categoryId): array
     {
         if ($categoryId <= 0) {
             return [];
+        }
+        if (isset($this->rulesCache[$categoryId])) {
+            return $this->rulesCache[$categoryId];
+        }
+
+        // Priorite aux regles de vie saisies sur la categorie (tranches d'age decimales).
+        $configured = $this->db->prepare(
+            'SELECT age_min, age_max, etat_theorique
+             FROM regles_vie_categories
+             WHERE categorie_id = :categorie_id
+             ORDER BY age_min ASC, ordre_affichage ASC'
+        );
+        $configured->execute(['categorie_id' => $categoryId]);
+        $rows = $configured->fetchAll();
+        if ($rows !== []) {
+            return $this->rulesCache[$categoryId] = array_map(static fn (array $row): array => [
+                'min_years' => (float) $row['age_min'],
+                'max_years' => $row['age_max'] !== null ? (float) $row['age_max'] : null,
+                'theoretical_state' => (string) $row['etat_theorique'],
+            ], $rows);
         }
 
         $sql = "SELECT seuil_neuf, seuil_bon, seuil_moyen, seuil_mauvais, duree_vie_normale
@@ -836,7 +874,7 @@ class Equipement extends Model
         $moyen = max($bon, (float) ($row['seuil_moyen'] ?? 5));
         $mauvais = max($moyen, (float) ($row['seuil_mauvais'] ?? $row['duree_vie_normale'] ?? 6));
 
-        return [
+        return $this->rulesCache[$categoryId] = [
             ['min_years' => 0.0, 'max_years' => $neuf, 'theoretical_state' => 'neuf'],
             ['min_years' => $neuf, 'max_years' => $bon, 'theoretical_state' => 'bon'],
             ['min_years' => $bon, 'max_years' => $moyen, 'theoretical_state' => 'moyen'],
@@ -884,7 +922,7 @@ class Equipement extends Model
         if (!empty($equipement['date_mise_service'])) {
             try {
                 $date = new \DateTime($equipement['date_mise_service']);
-                $age = $today - (int) $date->format('Y');
+                $age = $this->fullYearsSince($date);
                 return [
                     'age' => max(0, $age),
                     'source' => 'date_mise_service',
@@ -900,7 +938,7 @@ class Equipement extends Model
         if (!empty($equipement['date_achat'])) {
             try {
                 $date = new \DateTime($equipement['date_achat']);
-                $age = $today - (int) $date->format('Y');
+                $age = $this->fullYearsSince($date);
                 return [
                     'age' => max(0, $age),
                     'source' => 'date_achat',
@@ -956,9 +994,10 @@ class Equipement extends Model
             throw new \Exception("Le commentaire est obligatoire");
         }
 
+        $this->db->beginTransaction();
         try {
             // Get current state
-            $sql = "SELECT etat FROM equipements WHERE id = ?";
+            $sql = "SELECT etat, statut FROM equipements WHERE id = ? FOR UPDATE";
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$equipementId]);
             $result = $stmt->fetch();
@@ -968,6 +1007,9 @@ class Equipement extends Model
             }
             
             $ancienEtat = $result['etat'];
+            if ($ancienEtat === $nouvelEtat) {
+                throw new \Exception("L'equipement est deja dans l'etat : {$nouvelEtat}");
+            }
 
             // Update only the real equipment state; do not overwrite theoretical state here
             $sql = "UPDATE equipements SET etat = ? WHERE id = ?";
@@ -988,8 +1030,12 @@ class Equipement extends Model
                 $actorId !== false ? (int) $actorId : null,
             ]);
 
+            $this->db->commit();
             return true;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             throw $e;
         }
     }
@@ -1002,19 +1048,32 @@ class Equipement extends Model
      */
     public function getEtatHistorique(int $equipementId): array
     {
-        $sql = "SELECT NULL AS ancien_etat,
-                       NULL AS nouvel_etat,
-                       u.username AS agent_username,
+        $sql = "SELECT u.username AS agent_username,
                        h.commentaire,
                        h.created_at
                 FROM historique_equipements h
                 LEFT JOIN utilisateurs u ON u.id = h.effectue_par
                 WHERE h.equipement_id = ?
-                  AND h.type_operation IN ('modification_etat', 'maintenance', 'declassement')
-                ORDER BY created_at DESC";
+                  AND h.type_operation = 'modification_etat'
+                ORDER BY h.created_at DESC, h.id DESC";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$equipementId]);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        // changeEtat() enregistre "Etat: ancien -> nouveau | motif" : on reconstitue les deux etats.
+        foreach ($rows as &$row) {
+            $row['ancien_etat'] = null;
+            $row['nouvel_etat'] = null;
+            $comment = (string) ($row['commentaire'] ?? '');
+            if (preg_match('/^Etat:\s*([a-z_]+)\s*->\s*([a-z_]+)\s*(?:\|\s*(.*))?$/su', $comment, $m)) {
+                $row['ancien_etat'] = $m[1];
+                $row['nouvel_etat'] = $m[2];
+                $row['commentaire'] = trim((string) ($m[3] ?? ''));
+            }
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**
@@ -1031,7 +1090,8 @@ class Equipement extends Model
 
         $age = $this->calculateAgeInYears($equipement);
         if ($age === null) {
-            return 'bon';
+            // Sans aucune date, l'etat theorique ne peut pas etre calcule.
+            return 'inconnu';
         }
 
         $rules = $this->theoreticalRulesForCategory((int) ($equipement['categorie_id'] ?? 0));
@@ -1039,19 +1099,23 @@ class Equipement extends Model
             $rules = $this->defaultTheoreticalRules();
         }
 
+        usort($rules, static fn (array $a, array $b): int => (float) $a['min_years'] <=> (float) $b['min_years']);
+        $reached = null;
         foreach ($rules as $rule) {
             $min = (float) ($rule['min_years'] ?? 0);
             $max = $rule['max_years'] !== null ? (float) $rule['max_years'] : null;
             if ($age < $min) {
-                continue;
+                // Age situe dans un trou entre deux plages : on garde l'etat de la plage precedente.
+                break;
             }
+            $reached = (string) $rule['theoretical_state'];
 
             if ($max === null || $age < $max) {
-                return (string) $rule['theoretical_state'];
+                return $reached;
             }
         }
 
-        return (string) ($rules[count($rules) - 1]['theoretical_state'] ?? 'bon');
+        return $reached ?? (string) ($rules[0]['theoretical_state'] ?? 'bon');
     }
 
     /**

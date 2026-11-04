@@ -143,26 +143,38 @@ function parse_date_input(?string $input): ?string
 
     $input = trim($input);
 
-    // Already in YYYY-MM-DD format
-    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $input)) {
-        if (strtotime($input) !== false) {
-            return $input;
-        }
+    // AAAA-MM-JJ (champ type="date")
+    if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $input, $m)) {
+        return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? $input : null;
     }
 
-    // Try D/M/Y format
-    if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/', $input)) {
-        try {
-            $dt = DateTime::createFromFormat('d/m/Y', $input);
-            if ($dt !== false && $dt->format('d/m/Y') === $input) {
-                return $dt->format('Y-m-d');
-            }
-        } catch (Throwable $e) {
-            return null;
-        }
+    // JJ/MM/AAAA, J/M/AAAA, JJ-MM-AAAA ou JJ.MM.AAAA
+    if (preg_match('/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/', $input, $m)) {
+        [$day, $month, $year] = [(int) $m[1], (int) $m[2], (int) $m[3]];
+        return checkdate($month, $day, $year) ? sprintf('%04d-%02d-%02d', $year, $month, $day) : null;
     }
 
     return null;
+}
+
+/**
+ * Comme parse_date_input, mais refuse une saisie non vide invalide ou situee dans le futur
+ * au lieu de l'ignorer silencieusement.
+ */
+function parse_date_input_strict(?string $input, string $label, bool $allowFuture = false): ?string
+{
+    if ($input === null || trim($input) === '') {
+        return null;
+    }
+    $parsed = parse_date_input($input);
+    if ($parsed === null) {
+        throw new InvalidArgumentException($label . ' invalide : utilisez le format jj/mm/aaaa (ex : 15/03/2023).');
+    }
+    if (!$allowFuture && $parsed > date('Y-m-d')) {
+        throw new InvalidArgumentException($label . ' ne peut pas etre dans le futur.');
+    }
+
+    return $parsed;
 }
 
 /**
@@ -252,7 +264,8 @@ function state_label(string $state): string
         'mauvais' => 'Mauvais',
         'declasse' => 'Déclassé',
         'a_declasser' => 'À déclasser',
-        default => 'Unknown',
+        'inconnu' => 'Inconnu (aucune date)',
+        default => 'Inconnu',
     };
 }
 
@@ -264,4 +277,140 @@ function state_badge(string $state): string
     $class = state_badge_class($state);
     $label = state_label($state);
     return "<span class=\"badge {$class}\">{$label}</span>";
+}
+
+/**
+ * Lit un fichier d'import tabulaire (CSV ou XLSX) et renvoie une liste de lignes
+ * associatives [en-tete => valeur]. Gere le BOM UTF-8 d'Excel, le separateur ; ou ,
+ * les chaines partagees XLSX et les cellules vides.
+ */
+function read_tabular_file(string $path, string $originalName): array
+{
+    $name = strtolower($originalName);
+    if (str_ends_with($name, '.xlsx')) {
+        $matrix = read_xlsx_matrix($path);
+    } elseif (str_ends_with($name, '.csv') || str_ends_with($name, '.txt')) {
+        $matrix = read_csv_matrix($path);
+    } else {
+        throw new InvalidArgumentException('Format de fichier non supporte. Utilise CSV ou XLSX.');
+    }
+
+    if ($matrix === []) {
+        return [];
+    }
+
+    $headers = array_map(static fn ($h): string => trim((string) $h), array_shift($matrix));
+    $rows = [];
+    foreach ($matrix as $cells) {
+        if (implode('', array_map('trim', array_map('strval', $cells))) === '') {
+            continue; // ligne vide
+        }
+        $line = [];
+        foreach ($headers as $i => $header) {
+            if ($header === '') {
+                continue;
+            }
+            $line[$header] = trim((string) ($cells[$i] ?? ''));
+        }
+        $rows[] = $line;
+    }
+
+    return $rows;
+}
+
+function read_csv_matrix(string $path): array
+{
+    $content = file_get_contents($path);
+    if ($content === false) {
+        throw new RuntimeException('Impossible de lire le fichier CSV.');
+    }
+    if (str_starts_with($content, "\xEF\xBB\xBF")) {
+        $content = substr($content, 3);
+    }
+    if (!mb_check_encoding($content, 'UTF-8')) {
+        $content = mb_convert_encoding($content, 'UTF-8', 'Windows-1252');
+    }
+    $firstLine = strtok($content, "\r\n") ?: '';
+    $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
+
+    $handle = fopen('php://temp', 'r+');
+    fwrite($handle, $content);
+    rewind($handle);
+    $matrix = [];
+    while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+        $matrix[] = $row;
+    }
+    fclose($handle);
+
+    return $matrix;
+}
+
+function read_xlsx_matrix(string $path): array
+{
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('Extension PHP zip absente : import XLSX impossible, utilisez un CSV.');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        throw new RuntimeException('Impossible d\'ouvrir le fichier XLSX.');
+    }
+    $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+    $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+    $zip->close();
+    if ($sheetXml === false) {
+        throw new RuntimeException('Premiere feuille introuvable dans le fichier XLSX.');
+    }
+
+    $shared = [];
+    if ($sharedXml !== false) {
+        $sst = new SimpleXMLElement($sharedXml, LIBXML_NONET);
+        foreach ($sst->si as $si) {
+            if (isset($si->t)) {
+                $shared[] = (string) $si->t;
+            } else {
+                $text = '';
+                foreach ($si->r as $run) {
+                    $text .= (string) $run->t;
+                }
+                $shared[] = $text;
+            }
+        }
+    }
+
+    $sheet = new SimpleXMLElement($sheetXml, LIBXML_NONET);
+    $matrix = [];
+    foreach ($sheet->sheetData->row as $row) {
+        $cells = [];
+        $position = 0;
+        foreach ($row->c as $cell) {
+            $ref = (string) ($cell['r'] ?? '');
+            if ($ref !== '' && preg_match('/^([A-Z]+)/', $ref, $m)) {
+                $position = 0;
+                foreach (str_split($m[1]) as $letter) {
+                    $position = $position * 26 + (ord($letter) - 64);
+                }
+                $position--;
+            }
+            $type = (string) ($cell['t'] ?? '');
+            if ($type === 's') {
+                $value = $shared[(int) $cell->v] ?? '';
+            } elseif ($type === 'inlineStr') {
+                $value = (string) ($cell->is->t ?? '');
+            } else {
+                $value = (string) ($cell->v ?? '');
+            }
+            $cells[$position] = $value;
+            $position++;
+        }
+        if ($cells !== []) {
+            $max = max(array_keys($cells));
+            $dense = [];
+            for ($i = 0; $i <= $max; $i++) {
+                $dense[] = $cells[$i] ?? '';
+            }
+            $matrix[] = $dense;
+        }
+    }
+
+    return $matrix;
 }

@@ -326,6 +326,37 @@ class Utilisateur extends Model
         ]);
     }
 
+    /**
+     * Supprime un utilisateur sans historique, sinon le desactive (tracabilite).
+     * Refuse si du materiel lui est encore attribue.
+     *
+     * @return string 'deleted' ou 'deactivated'
+     */
+    public function deleteOrDeactivate(int $id): string
+    {
+        $active = $this->db->prepare("SELECT COUNT(*) FROM attributions WHERE utilisateur_id = :id AND statut = 'active'");
+        $active->execute(['id' => $id]);
+        if ((int) $active->fetchColumn() > 0) {
+            throw new RuntimeException('Cet utilisateur detient encore du materiel : faites d\'abord le retour au stock.');
+        }
+
+        $history = $this->db->prepare(
+            'SELECT (SELECT COUNT(*) FROM attributions WHERE utilisateur_id = :a)
+                  + (SELECT COUNT(*) FROM demandes WHERE demandeur_id = :d OR validateur_id = :v)
+                  + (SELECT COUNT(*) FROM historique_equipements WHERE utilisateur_source_id = :hs OR utilisateur_destination_id = :hd OR effectue_par = :hp)
+                  + (SELECT COUNT(*) FROM validations_demandes WHERE validateur_id = :vd)'
+        );
+        $history->execute(['a' => $id, 'd' => $id, 'v' => $id, 'hs' => $id, 'hd' => $id, 'hp' => $id, 'vd' => $id]);
+
+        if ((int) $history->fetchColumn() > 0) {
+            $this->db->prepare('UPDATE utilisateurs SET actif = 0 WHERE id = :id')->execute(['id' => $id]);
+            return 'deactivated';
+        }
+
+        $this->delete($id);
+        return 'deleted';
+    }
+
     public function delete(int $id): bool
     {
         $stmt = $this->db->prepare('DELETE FROM utilisateurs WHERE id = :id');

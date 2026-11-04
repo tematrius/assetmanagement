@@ -66,7 +66,7 @@
                 <div class="col-md-3">
                     <label class="form-label">Etat</label>
                     <select name="etat" class="form-select">
-                        <?php foreach (['neuf', 'bon', 'mauvais', 'declasse'] as $etat): ?>
+                        <?php foreach (['bon'] as $etat): ?>
                             <option value="<?= e($etat) ?>"><?= e($etat) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -101,7 +101,7 @@
                 <div class="col-md-3">
                     <label class="form-label">Etat</label>
                     <select name="etat" class="form-select">
-                        <?php foreach (['neuf', 'bon', 'mauvais', 'declasse'] as $etat): ?>
+                        <?php foreach (['bon', 'maintenance', 'mauvais', 'declasse'] as $etat): ?>
                             <option value="<?= e($etat) ?>"><?= e($etat) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -127,7 +127,7 @@
                 <div class="col-md-3">
                     <label class="form-label">De</label>
                     <select name="from_etat" class="form-select">
-                        <?php foreach (['neuf', 'bon', 'mauvais', 'declasse'] as $etat): ?>
+                        <?php foreach (['bon', 'maintenance', 'mauvais', 'declasse'] as $etat): ?>
                             <option value="<?= e($etat) ?>"><?= e($etat) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -135,7 +135,7 @@
                 <div class="col-md-3">
                     <label class="form-label">Vers</label>
                     <select name="to_etat" class="form-select">
-                        <?php foreach (['neuf', 'bon', 'mauvais', 'declasse'] as $etat): ?>
+                        <?php foreach (['bon', 'maintenance', 'mauvais', 'declasse'] as $etat): ?>
                             <option value="<?= e($etat) ?>"><?= e($etat) ?></option>
                         <?php endforeach; ?>
                     </select>

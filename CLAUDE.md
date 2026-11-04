@@ -1,5 +1,17 @@
 # Instructions pour travailler sur ITAM
 
+## Agents spécialisés Claude Code
+
+Les agents de `.claude/agents/` sont disponibles pour les tâches qui justifient une délégation.
+Claude principal coordonne ; `itam-developpeur` modifie le code, `itam-testeur` vérifie
+les régressions, `itam-qa` revoit la qualité et `itam-security` audite la sécurité.
+Le skill `/itam-delivery` décrit leur coordination et les critères de livraison.
+Transmettre à chaque agent son périmètre et les preuves utiles ; éviter les écritures concurrentes.
+Les définitions d'agents et skills ne constituent pas une preuve de test ou d'audit réalisé.
+Le serveur Playwright de .mcp.json fournit le navigateur aux agents après activation dans Claude Code.
+Consulter docs/CLAUDE_AGENTS_GUIDE.md pour les accès, campagnes UX et preuves.
+Les profils navigateur temporaires ne rendent pas la base de données jetable.
+
 ## Projet et communication
 
 - ITAM est une application intranet de gestion des actifs informatiques pour une banque.

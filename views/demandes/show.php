@@ -165,7 +165,7 @@ $organization = array_filter([
         <?php if ($canApprove): ?>
             <section class="request-detail-section request-decision-panel">
                 <div class="request-detail-section-title"><span><i class="bi bi-check2-square"></i></span><div><h3>Prendre une decision</h3><p>Votre decision sera ajoutee a l'historique du dossier.</p></div></div>
-                <form method="POST" action="<?= e(base_url('demandes/' . (int) $demande['id'] . '/validate')) ?>">
+                <form method="POST" action="<?= e(base_url('demandes/' . (int) $demande['id'] . '/validate')) ?>"><input type="hidden" name="statut_attendu" value="<?= e((string) ($demande['statut'] ?? '')) ?>">
                     <?= csrf_field() ?>
                     <label class="form-label" for="commentaire">Commentaire de validation</label>
                     <textarea class="form-control" id="commentaire" name="commentaire" rows="3" placeholder="Ajoutez un contexte utile au demandeur et a l'IT"></textarea>

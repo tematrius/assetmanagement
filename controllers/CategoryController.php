@@ -202,59 +202,7 @@ class CategoryController extends Controller
         $messages = [];
 
         try {
-            $rows = [];
-            if (str_ends_with($name, '.csv')) {
-                $h = fopen($tmp, 'rb');
-                $headers = fgetcsv($h, 0, ';');
-                while (($row = fgetcsv($h, 0, ';')) !== false) {
-                    $line = [];
-                    foreach ($headers as $i => $header) {
-                        $line[trim((string) $header)] = trim((string) ($row[$i] ?? ''));
-                    }
-                    $rows[] = $line;
-                }
-                fclose($h);
-            } elseif (str_ends_with($name, '.xlsx')) {
-                $zip = new ZipArchive();
-                if ($zip->open($tmp) === true) {
-                    $xml = $zip->getFromName('xl/worksheets/sheet1.xml');
-                    $zip->close();
-                    if ($xml !== false) {
-                        $doc = new SimpleXMLElement($xml);
-                        $ns = $doc->getNamespaces(true);
-                        $rowsXml = $doc->sheetData->row;
-                        $headers = [];
-                        foreach ($rowsXml as $rIndex => $r) {
-                            $cells = [];
-                            foreach ($r->c as $c) {
-                                $v = '';
-                                if (isset($c->is->t)) {
-                                    $v = (string) $c->is->t;
-                                } elseif (isset($c->v)) {
-                                    $v = (string) $c->v;
-                                }
-                                $cells[] = $v;
-                            }
-
-                            if ($rIndex == 0) {
-                                $headers = $cells;
-                                continue;
-                            }
-
-                            $line = [];
-                            foreach ($headers as $i => $hname) {
-                                $line[trim((string) $hname)] = trim((string) ($cells[$i] ?? ''));
-                            }
-                            $rows[] = $line;
-                        }
-                    }
-                } else {
-                    throw new RuntimeException('Impossible d ouvrir le fichier XLSX.');
-                }
-            } else {
-                flash('error', 'Format de fichier non supporte. Utilise CSV ou XLSX.');
-                redirect('categories/import');
-            }
+            $rows = read_tabular_file((string) $tmp, $name);
 
             foreach ($rows as $r) {
                 $nom = trim((string) ($r['nom'] ?? $r['Nom'] ?? ''));
@@ -271,10 +219,13 @@ class CategoryController extends Controller
                 $mode = in_array(trim((string) ($r['mode_gestion'] ?? 'unique')), ['unique', 'quantite'], true) ? trim((string) ($r['mode_gestion'] ?? 'unique')) : 'unique';
                 $normal = trim((string) ($r['normal_life_years'] ?? ($r['normal_life_years'] ?? '')));
 
+                $visibleRaw = strtolower(trim((string) ($r['visible_dans_demandes'] ?? '1')));
                 $this->categories->create([
                     'nom' => $nom,
                     'mode_gestion' => $mode,
                     'normal_life_years' => $normal,
+                    // Visible dans les demandes par defaut, sauf mention explicite "0", "non" ou "false".
+                    'visible_dans_demandes' => !in_array($visibleRaw, ['0', 'non', 'false', 'no'], true),
                 ], [], []);
                 $created++;
             }

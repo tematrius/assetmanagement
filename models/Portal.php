@@ -13,7 +13,7 @@ class Portal extends Model
         $stock->execute(['id' => $userId]);
 
         $requests = $this->db->prepare("SELECT COUNT(*) total,
-            SUM(statut IN ('soumis','validation_responsable','validation_it')) pending,
+            SUM(statut IN ('soumis','validation_responsable','validation_it','correction_requise')) pending,
             SUM(statut IN ('approuve','attribue','cloture')) approved
             FROM demandes WHERE demandeur_id = :id");
         $requests->execute(['id' => $userId]);
@@ -101,8 +101,8 @@ class Portal extends Model
     {
         $stmt = $this->db->prepare("SELECT d.*, d.created_at AS date_demande,
             c.nom AS categorie_nom, v.nom_complet AS validateur_nom,
-            (SELECT decision FROM validations_demandes vd WHERE vd.demande_id = d.id AND vd.niveau = 'responsable' LIMIT 1) AS decision_responsable,
-            (SELECT decision FROM validations_demandes vd WHERE vd.demande_id = d.id AND vd.niveau = 'manager_it' LIMIT 1) AS decision_it
+            (SELECT decision FROM validations_demandes vd WHERE vd.demande_id = d.id AND vd.niveau = 'responsable' AND vd.decision <> 'resoumis' ORDER BY vd.id DESC LIMIT 1) AS decision_responsable,
+            (SELECT decision FROM validations_demandes vd WHERE vd.demande_id = d.id AND vd.niveau = 'manager_it' AND vd.decision <> 'resoumis' ORDER BY vd.id DESC LIMIT 1) AS decision_it
             FROM demandes d
             LEFT JOIN categories_equipements c ON c.id = d.categorie_id
             JOIN utilisateurs v ON v.id = d.validateur_id
@@ -116,7 +116,7 @@ class Portal extends Model
     {
         return array_values(array_filter(
             $this->requestsFor($userId),
-            static fn (array $request): bool => in_array((string) $request['statut'], ['approuve', 'rejete', 'attribue', 'cloture'], true)
+            static fn (array $request): bool => in_array((string) $request['statut'], ['rejete', 'cloture'], true)
         ));
     }
 

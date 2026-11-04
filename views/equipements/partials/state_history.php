@@ -30,15 +30,19 @@ $stateHistory = $state_history ?? [];
                                 </small>
                             </div>
                             <div style="flex-grow: 1;">
+                                <?php if (!empty($entry['ancien_etat']) && !empty($entry['nouvel_etat'])): ?>
                                 <div class="mb-2">
-                                    <span class="badge <?= state_badge_class($entry['ancien_etat'] ?? 'bon') ?>">
-                                        <?= state_label($entry['ancien_etat'] ?? 'bon') ?>
+                                    <span class="badge <?= state_badge_class($entry['ancien_etat']) ?>">
+                                        <?= state_label($entry['ancien_etat']) ?>
                                     </span>
                                     <i class="bi bi-arrow-right mx-2"></i>
-                                    <span class="badge <?= state_badge_class($entry['nouvel_etat'] ?? 'bon') ?>">
-                                        <?= state_label($entry['nouvel_etat'] ?? 'bon') ?>
+                                    <span class="badge <?= state_badge_class($entry['nouvel_etat']) ?>">
+                                        <?= state_label($entry['nouvel_etat']) ?>
                                     </span>
                                 </div>
+                                <?php else: ?>
+                                <div class="mb-2"><span class="badge bg-secondary">Changement d'etat</span></div>
+                                <?php endif; ?>
                                 <div class="small">
                                     <strong class="text-primary"><?= e($entry['agent_username'] ?? 'Système') ?></strong>
                                 </div>

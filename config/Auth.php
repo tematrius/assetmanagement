@@ -49,6 +49,15 @@ class Auth
         return !self::isAdmin() && (self::isItAgent() || self::isManagerIt());
     }
 
+    /**
+     * Declassement d'equipement : meme perimetre que requireRole(['Admin']).
+     * A ajuster ici lors de la revue des droits (Manager IT).
+     */
+    public static function canDeclassify(): bool
+    {
+        return self::isAdmin() || self::isManagerIt();
+    }
+
     public static function canValidate(): bool
     {
         return !empty($_SESSION['user']['peut_valider']);

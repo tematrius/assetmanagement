@@ -31,7 +31,7 @@ class Reporting extends Model
             'equipements_attribues' => $this->count('SELECT COUNT(DISTINCT e.id)' . $base . $equipmentWhere . " AND e.statut = 'attribue'", $equipmentParams),
             'equipements_maintenance' => $this->count('SELECT COUNT(DISTINCT e.id)' . $base . $equipmentWhere . " AND e.statut = 'maintenance'", $equipmentParams),
             'equipements_hors_service' => $this->count('SELECT COUNT(DISTINCT e.id)' . $base . $equipmentWhere . " AND e.statut = 'declasse'", $equipmentParams),
-            'demandes_en_attente' => $this->count("SELECT COUNT(*) FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $demandWhere . " AND d.statut IN ('soumis','validation_responsable','validation_it')", $demandParams),
+            'demandes_en_attente' => $this->count("SELECT COUNT(*) FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $demandWhere . " AND d.statut IN ('soumis','validation_responsable','validation_it','correction_requise')", $demandParams),
             'demandes_validees' => $this->count("SELECT COUNT(*) FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $demandWhere . " AND d.statut IN ('approuve','attribue','cloture')", $demandParams),
             'mouvements_total' => $this->count('SELECT COUNT(*) FROM historique_equipements h LEFT JOIN equipements e ON e.id = h.equipement_id LEFT JOIN categories_equipements c ON c.id = e.categorie_id LEFT JOIN utilisateurs u ON u.id = h.utilisateur_destination_id' . $historyWhere, $historyParams),
         ];
@@ -98,7 +98,15 @@ class Reporting extends Model
     public function bySite(array $filters = []): array
     {
         [$where, $params] = $this->equipmentFilters($filters);
-        return $this->rows("SELECT COALESCE(u.agence, 'Non attribue') site, COUNT(DISTINCT e.id) total, COUNT(DISTINCT e.id) equipements_total" . $this->equipmentBase() . $where . " GROUP BY COALESCE(u.agence, 'Non attribue') ORDER BY site", $params);
+        // Materiel affecte directement a un site (imprimantes...) : site du dernier mouvement vers ce site.
+        $site = "COALESCE(u.agence,
+            CASE WHEN e.statut = 'attribue' THEN (
+                SELECT hs.destination_label FROM historique_equipements hs
+                WHERE hs.equipement_id = e.id AND hs.destination_type = 'site' AND hs.destination_label IS NOT NULL
+                ORDER BY hs.created_at DESC, hs.id DESC LIMIT 1
+            ) END,
+            'Non attribue')";
+        return $this->rows("SELECT " . $site . " site, COUNT(DISTINCT e.id) total, COUNT(DISTINCT e.id) equipements_total" . $this->equipmentBase() . $where . " GROUP BY site ORDER BY site", $params);
     }
 
     public function byDepartement(array $filters = []): array
@@ -166,7 +174,7 @@ class Reporting extends Model
         [$where, $params] = $this->demandFilters($filters);
         $avg = $this->rows("SELECT AVG(TIMESTAMPDIFF(HOUR, d.created_at, COALESCE(d.date_validation_it, d.date_validation_responsable))) avg_hours
             FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $where . ' AND COALESCE(d.date_validation_it, d.date_validation_responsable) IS NOT NULL', $params);
-        $pending = $this->count("SELECT COUNT(*) FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $where . " AND d.statut IN ('soumis','validation_responsable','validation_it') AND TIMESTAMPDIFF(HOUR, d.created_at, NOW()) > 72", $params);
+        $pending = $this->count("SELECT COUNT(*) FROM demandes d JOIN utilisateurs ud ON ud.id = d.demandeur_id" . $where . " AND d.statut IN ('soumis','validation_responsable','validation_it','correction_requise') AND TIMESTAMPDIFF(HOUR, d.created_at, NOW()) > 72", $params);
         return ['avg_validation_hours' => round((float) ($avg[0]['avg_hours'] ?? 0), 1), 'pending_over_72h' => $pending];
     }
 
@@ -219,6 +227,10 @@ class Reporting extends Model
         if (($filters['direction'] ?? '') !== '') {
             $conditions[] = 'ud.direction = :d_direction';
             $params['d_direction'] = $filters['direction'];
+        }
+        if (($filters['type'] ?? '') !== '') {
+            $conditions[] = 'd.categorie_id IN (SELECT ct.id FROM categories_equipements ct WHERE ct.nom = :d_type)';
+            $params['d_type'] = $filters['type'];
         }
         if (($filters['date_from'] ?? '') !== '') {
             $conditions[] = 'd.created_at >= :d_from';
